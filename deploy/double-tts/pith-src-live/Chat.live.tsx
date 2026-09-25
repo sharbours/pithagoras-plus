@@ -1,17 +1,12 @@
 import { ActivityProgress } from './ActivityProgress';
 import { useWorkPanels } from "../use-work-panels";
-import { FilesPanel } from "./FilesPanel";
-import { useFollowBottom } from "../use-follow-bottom";
 import { CanvasPanel } from "./CanvasPanel";
 import { displaySpeechText } from "../voice";
 import { latestBrowserActivity, latestTerminalActivity } from "../voice-browser";
 import { VoiceControl } from "./VoiceControl";
-import { DictationButton, DictationStrip } from "./Dictation";
-import { insertAtCaret } from "../dictation";
-import { useDictation } from "../use-dictation";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown, type DiagramPlugin } from "streamdown";
-import { LuFolderOpen, LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines, LuPencil, LuRotateCw, LuTrash2 } from "react-icons/lu";
+import { LuGlobe, LuSquareTerminal, LuSquare, LuFileText, LuArrowUp, LuAudioLines } from "react-icons/lu";
 import { api, type PiCommand, type PortalEvent, type Session } from "../api";
 import { activity, buildTranscript, type Activity } from "../transcript";
 import { HAS_MERMAID, loadMermaidPlugin } from "../mermaid";
@@ -23,32 +18,6 @@ import { NewChatButton } from "./NewChatButton";
 import { isCompact, subscribeCompact } from "../compact-mode";
 import { SpeakReplies } from "./SpeakReplies";
 import { TerminalPanel } from "./TerminalPanel";
-
-/** How many messages are drawn at first, and added each time you scroll up to the edge. */
-const PAGE = 40;
-
-const COMPOSER_HEIGHT_KEY = "pithagoras.composerHeight";
-const DEFAULT_COMPOSER_HEIGHT = 72;
-const MIN_COMPOSER_HEIGHT = 56;
-
-function storedComposerHeight(): number {
-  try {
-    const stored = Number.parseInt(localStorage.getItem(COMPOSER_HEIGHT_KEY) ?? "", 10);
-    return Number.isFinite(stored) && stored >= MIN_COMPOSER_HEIGHT
-      ? stored
-      : DEFAULT_COMPOSER_HEIGHT;
-  } catch {
-    return DEFAULT_COMPOSER_HEIGHT;
-  }
-}
-
-function persistComposerHeight(height: number) {
-  try {
-    localStorage.setItem(COMPOSER_HEIGHT_KEY, String(Math.round(height)));
-  } catch {
-    // Resizing should still work when browser storage is unavailable.
-  }
-}
 
 /**
  * Context the portal attaches to a message, and what to call it.
@@ -114,11 +83,8 @@ export function Chat({
   session,
   events,
   onSend,
-  onEditMessage,
-  onDeleteMessage,
   onAbort,
   onClientCommand,
-  loading,
   hasEarlier,
   loadingEarlier,
   onLoadEarlier,
@@ -126,16 +92,10 @@ export function Chat({
 }: {
   session: Session;
   events: PortalEvent[];
-  /** The conversation is still arriving; drawing it now would show it half-built. */
-  loading?: boolean;
   hasEarlier?: boolean;
   loadingEarlier?: boolean;
   onLoadEarlier?: () => void;
   onSend: (message: string, options?: { voice?: boolean }) => Promise<void>;
-  /** Replace a sent message: it and everything after it are dropped, and the new text is sent. */
-  onEditMessage: (seq: number, message: string) => Promise<void>;
-  /** Remove a sent message and the agent's answer to it. */
-  onDeleteMessage: (seq: number) => Promise<void>;
   onAbort: () => Promise<void>;
   /** Builtins the portal itself services — /settings, /new, /name. */
   onClientCommand: (name: string, args: string) => void | Promise<void>;
@@ -143,16 +103,7 @@ export function Chat({
   onCreateNew?: () => Promise<void>;
 }) {
   const [input, setInput] = useState("");
-  // Where dictated words go. Kept beside the state because several phrases can
-  // arrive before React has drawn the first, and each must land after the last.
-  const box = useRef<HTMLTextAreaElement>(null);
-  const draft = useRef(input);
-  draft.current = input;
-  const caret = useRef<{ start: number; end: number } | null>(null);
-  const caretTo = useRef<number | null>(null);
   const [voiceMode, setVoiceMode] = useState(false);
-  const [showFiles, setShowFiles] = useState(false);
-  const workspaceName = session.workspace.split("/").filter(Boolean).pop() ?? "";
   // Small-display layout, kept in step with the compact store so the New Chat
   // button appears and retires with it without a full page re-render.
   const [compactView, setCompactView] = useState(isCompact());
@@ -170,14 +121,7 @@ export function Chat({
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [voiceHost, setVoiceHost] = useState<HTMLDivElement | null>(null);
   const [sending, setSending] = useState(false);
-  // Which sent message is being rewritten, and what went wrong with the last
-  // thing done to one — shown in the transcript, where the message is.
-  const [editing, setEditing] = useState<number | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
   const [panelRequest, setPanelRequest] = useState<"model" | "effort" | null>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
-  const resizeCleanupRef = useRef<(() => void) | null>(null);
-  const [composerHeight, setComposerHeight] = useState(storedComposerHeight);
   // Whether there is a browser to watch, and whether you are watching it. Asked
   // once — the answer only changes when somebody installs or removes one.
   const [browserUp, setBrowserUp] = useState(false);
@@ -232,115 +176,9 @@ export function Chat({
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
   };
-  const scroller = useFollowBottom<HTMLDivElement>();
-  const lastSpoken = useRef<string | null>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const settled = useRef(false);
   const items = useMemo(() => buildTranscript(events), [events]);
-  // The last thing the person said. Retrying it replaces it and what came of
-  // it, which is only safe where nothing follows that would go too.
-  const lastSaid = useMemo(() => {
-    for (let i = items.length - 1; i >= 0; i--) {
-      const it = items[i];
-      if (it.kind === "user" && splitContext(it.text).text) return it.id;
-    }
-    return undefined;
-  }, [items]);
-
-  // Only the end of a conversation is drawn to begin with. Drawing all of a long
-  // one is what made opening it slow, and the top of it is not what anybody
-  // opens it for. Earlier messages are added as you scroll towards them.
-  const [shown, setShown] = useState(PAGE);
-  // Reading above the end: what is appended must not push the oldest message
-  // drawn out of the window, and with it whatever is being read. The window
-  // grows by what was added instead; at the end it slides along as before.
-  const [tail, setTail] = useState<{ id?: string; count: number }>({ count: 0 });
-  const lastId = items.length ? items[items.length - 1].id : undefined;
-  if (lastId !== tail.id || items.length !== tail.count) {
-    let appended = 0;
-    if (tail.id && lastId !== tail.id) {
-      for (let i = items.length - 1; i >= 0 && items[i].id !== tail.id; i--) appended++;
-      // The one that was last is gone, so this is not something added after it.
-      if (appended === items.length) appended = 0;
-    }
-    if (appended > 0 && !scroller.following.current) setShown((n) => n + appended);
-    setTail({ id: lastId, count: items.length });
-  }
-  const visible = shown >= items.length ? items : items.slice(items.length - shown);
-  const hiddenHere = items.length - visible.length;
-  const topEdge = useRef<HTMLDivElement>(null);
-  const list = useRef<HTMLDivElement>(null);
-  /**
-   * The message being read when earlier ones were requested, and where it sat.
-   * Messages are added above it, and their height keeps changing for a moment
-   * (markdown and code blocks settle after they mount), so the view is kept on
-   * that message rather than on a scroll offset worked out once.
-   */
-  const reading = useRef<{ el: Element; offset: number; first?: string; count: number; until: number } | null>(null);
-  const reveal = () => {
-    const box = scroller.ref.current;
-    if (box && list.current) {
-      const top = box.getBoundingClientRect().top;
-      // A message, not the edge or the button above them: those come and go.
-      const el = [...list.current.children].find(
-        (k) => k !== topEdge.current && !k.hasAttribute("data-earlier") && k.getBoundingClientRect().bottom > top + 1,
-      );
-      reading.current = el
-        ? { el, offset: el.getBoundingClientRect().top - top, first: visible[0]?.id, count: items.length, until: Infinity }
-        : null;
-    }
-    if (hiddenHere > 0) setShown((n) => n + PAGE);
-    else if (hasEarlier && !loadingEarlier) onLoadEarlier?.();
-  };
-  const keepPlace = () => {
-    const box = scroller.ref.current;
-    const r = reading.current;
-    if (!box || !r) return;
-    if (performance.now() > r.until || !r.el.isConnected) {
-      reading.current = null;
-      return;
-    }
-    // Nothing has been added yet — the request is still on its way.
-    if (r.until === Infinity) return;
-    const drift = r.el.getBoundingClientRect().top - box.getBoundingClientRect().top - r.offset;
-    if (Math.abs(drift) >= 1) box.scrollTop += drift;
-  };
-  const revealNow = useRef(reveal);
-  revealNow.current = reveal;
-  // A different conversation starts from its end again. Only `shown`: what was
-  // last said follows from the events, and clearing it here as well would make
-  // the first update after opening look like a message just sent — and pull the
-  // view to the end from wherever it was being read.
-  useEffect(() => {
-    setShown(PAGE);
-  }, [session.id]);
-  // Added above without moving what is being read.
-  useLayoutEffect(() => {
-    const r = reading.current;
-    // What was asked for has arrived: from here the place is held while it settles.
-    if (r && r.until === Infinity && (visible[0]?.id !== r.first || items.length !== r.count)) {
-      r.until = performance.now() + 1500;
-    }
-    keepPlace();
-  });
-  useEffect(() => {
-    if (!list.current) return;
-    const observer = new ResizeObserver(keepPlace);
-    observer.observe(list.current);
-    return () => observer.disconnect();
-  }, []);
-  useEffect(() => {
-    const root = scroller.ref.current;
-    const edge = topEdge.current;
-    if (!root || !edge || loading) return;
-    if (hiddenHere === 0 && (!hasEarlier || loadingEarlier)) return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) revealNow.current();
-      },
-      { root, rootMargin: "600px 0px 0px 0px" },
-    );
-    observer.observe(edge);
-    return () => observer.disconnect();
-  }, [loading, hiddenHere, hasEarlier, loadingEarlier, shown]);
 
 
   // Diagrams: the plugin is only fetched once a reply actually contains a
@@ -404,6 +242,7 @@ export function Chat({
   useEffect(() => {
     // Only offered where it would work: an iframe needs a secure context, and
     // over plain HTTP the client inside it refuses to start.
+    settled.current = false;
     if (!window.isSecureContext) return;
     api
       .browser()
@@ -411,58 +250,17 @@ export function Chat({
       .catch(() => setBrowserUp(false));
   }, []);
 
-  useLayoutEffect(() => {
-    // Stay at the end while the agent writes — unless you scrolled up to read,
-    // which new output must not undo. Something you just said, and the first
-    // paint of a conversation, always go to the end — before it is painted, so
-    // the top of it is never seen, nor new content at the old scroll position.
-    let said: string | null = null;
-    for (let i = items.length - 1; i >= 0 && !said; i--) if (items[i].kind === "user") said = items[i].id;
-    const fresh = said !== lastSpoken.current;
-    lastSpoken.current = said;
-    scroller.follow(fresh);
+  useEffect(() => {
+    // Jump on the first paint, glide afterwards. Smooth-scrolling through a
+    // whole replayed conversation is the thing that looked broken on refresh.
+    bottomRef.current?.scrollIntoView({ behavior: settled.current ? "smooth" : "auto" });
+    settled.current = true;
   }, [items.length, events.length]);
 
-  useEffect(() => () => resizeCleanupRef.current?.(), []);
+  const send = async () => {
+    const msg = input.trim();
+    if (!msg || sending) return;
 
-  const startComposerResize = (event: React.PointerEvent<HTMLButtonElement>) => {
-    event.preventDefault();
-    resizeCleanupRef.current?.();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    const startY = event.clientY;
-    const maxHeight = Math.round(window.innerHeight * 0.45);
-    const startHeight = Math.min(
-      maxHeight,
-      box.current?.getBoundingClientRect().height ?? composerHeight,
-    );
-
-    const move = (moveEvent: PointerEvent) => {
-      const nextHeight = Math.max(
-        MIN_COMPOSER_HEIGHT,
-        Math.min(maxHeight, startHeight + startY - moveEvent.clientY),
-      );
-      setComposerHeight(nextHeight);
-    };
-    const cleanup = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
-      resizeCleanupRef.current = null;
-    };
-    const finish = () => {
-      cleanup();
-      const height = box.current?.getBoundingClientRect().height ?? composerHeight;
-      persistComposerHeight(height);
-    };
-
-    resizeCleanupRef.current = cleanup;
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
-  };
-
-  /** Send `msg` as a message, or run it if it is one of the portal's own commands. */
-  const submit = async (msg: string, fromBox: boolean) => {
     // Some builtins are UI, not prompts: /model opens the picker the pill uses,
     // /settings opens the modal. Sending them to pi would just be a chat line.
     const parsed = /^\/([\w-]+)\s*(.*)$/.exec(msg);
@@ -470,76 +268,18 @@ export function Chat({
       ? commands.find((c) => c.name === parsed[1] && c.where === "client")
       : undefined;
     if (client && parsed) {
-      if (fromBox) clearBox();
+      setInput("");
       if (client.name === "model") setPanelRequest("model");
       else await onClientCommand(client.name, parsed[2]);
       return;
     }
 
     setSending(true);
-    if (fromBox) clearBox();
+    setInput("");
     try {
       await onSend(msg, voiceMode ? { voice: true } : undefined);
     } finally {
       setSending(false);
-    }
-  };
-
-  const send = async () => {
-    const msg = input.trim();
-    if (!msg || sending) return;
-    await submit(msg, true);
-  };
-
-  const clearBox = () => {
-    caret.current = null;
-    setInput("");
-  };
-
-  /** Dictated words, put in the box where the cursor was and the cursor left after them. */
-  const insertSpoken = (text: string) => {
-    const at = caret.current ?? { start: draft.current.length, end: draft.current.length };
-    const next = insertAtCaret(draft.current, at.start, at.end, text);
-    draft.current = next.value;
-    caret.current = { start: next.caret, end: next.caret };
-    caretTo.current = next.caret;
-    setInput(next.value);
-  };
-  useLayoutEffect(() => {
-    if (caretTo.current === null) return;
-    box.current?.setSelectionRange(caretTo.current, caretTo.current);
-    caretTo.current = null;
-  }, [input]);
-
-  // Phrases sent as they are said go one at a time: a second must not overtake
-  // the first, and one that fails goes back in the box rather than being lost.
-  const spoken = useRef<Promise<unknown>>(Promise.resolve());
-  const sendSpoken = (text: string) => {
-    spoken.current = spoken.current.then(async () => {
-      try {
-        await submit(text, false);
-      } catch {
-        insertSpoken(text);
-      }
-    });
-  };
-  const dictation = useDictation({
-    sessionId: session.id,
-    disabled: voiceMode,
-    onText: insertSpoken,
-    onSend: sendSpoken,
-  });
-  // One microphone: voice mode takes over from dictation.
-  useEffect(() => {
-    if (voiceMode) void dictation.stop();
-  }, [voiceMode, dictation.stop]);
-
-  const attempt = async (fn: () => Promise<void>) => {
-    setActionError(null);
-    try {
-      await fn();
-    } catch (e) {
-      setActionError((e as Error).message);
     }
   };
 
@@ -595,10 +335,6 @@ export function Chat({
           >
             <LuSquareTerminal className="h-3.5 w-3.5" />
           </button>
-          <button onClick={() => setShowFiles(v => !v)} aria-label="Workspace files" title="Workspace files" aria-expanded={showFiles}
-            className={`rounded-lg border px-2 py-1 text-xs transition ${showFiles ? 'border-accent/40 bg-accent/10 text-accent' : 'border-line text-fg-muted hover:bg-fg/5 hover:text-fg'}`}>
-            <LuFolderOpen className="h-3.5 w-3.5" />
-          </button>
           <button onClick={() => setCanvasOpen(v => !v)} aria-label="Session canvases" title="Session canvases" aria-expanded={canvasOpen}
             className={`rounded-lg border px-2 py-1 text-xs transition ${canvasOpen ? 'border-accent/40 bg-accent/10 text-accent' : 'border-line text-fg-muted hover:bg-fg/5 hover:text-fg'}`}>
             <LuFileText className="h-3.5 w-3.5" />
@@ -609,20 +345,10 @@ export function Chat({
 
       <div className={voiceMode ? "hidden" : "flex min-h-0 flex-1"}>
       <div className="flex min-w-0 flex-1 flex-col">
-      <div
-        ref={scroller.ref}
-        onScroll={scroller.onScroll}
-        // Reading takes over from the automatic placement.
-        onWheel={() => (reading.current = null)}
-        onTouchStart={() => (reading.current = null)}
-        onKeyDown={() => (reading.current = null)}
-        onPointerDown={() => (reading.current = null)}
-        className="flex-1 overflow-y-auto px-4 py-6"
-      >
-        <div ref={list} className="mx-auto w-full max-w-3xl space-y-3">
-        <div ref={topEdge} aria-hidden className="h-px" />
-        {!loading && hasEarlier && hiddenHere === 0 && (
-          <div data-earlier="" className="flex justify-center pb-2">
+      <div className="flex-1 overflow-y-auto px-4 py-6">
+        <div className="mx-auto w-full max-w-3xl space-y-3">
+        {hasEarlier && (
+          <div className="flex justify-center pb-2">
             <button
               onClick={onLoadEarlier}
               disabled={loadingEarlier}
@@ -633,20 +359,14 @@ export function Chat({
           </div>
         )}
 
-        {loading && (
-          <p role="status" className="pt-16 text-center text-sm text-fg-muted">
-            Loading the conversation…
-          </p>
-        )}
-
-        {!loading && items.length === 0 && (
+        {items.length === 0 && (
           <div className="pt-16 text-center">
             <p className="text-sm text-fg-muted">Give pi a task.</p>
             <p className="mt-1 text-xs text-fg-faint">You can close this tab — it keeps working.</p>
           </div>
         )}
 
-        {(loading ? [] : visible).map((item) => {
+        {items.map((item) => {
           if (item.kind === "user") {
             const { text, blocks } = splitContext(item.text);
             // Nothing but framing: the portal spoke, not a person. Drawing it as
@@ -660,24 +380,8 @@ export function Chat({
                 </div>
               );
             }
-            if (editing === item.seq) {
-              return (
-                <div key={item.id} className="flex justify-end">
-                  <MessageEditor
-                    initial={text}
-                    onCancel={() => setEditing(null)}
-                    onSave={(next) =>
-                      attempt(async () => {
-                        await onEditMessage(item.seq, next);
-                        setEditing(null);
-                      })
-                    }
-                  />
-                </div>
-              );
-            }
             return (
-              <div key={item.id} className="group flex flex-col items-end gap-1">
+              <div key={item.id} className="flex justify-end">
                 <div className="max-w-[80%] rounded-2xl rounded-br-md bg-accent/10 px-3.5 py-2 text-sm text-fg ring-1 ring-inset ring-accent/15">
                   {item.audio && <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-accent" title="Sent in voice mode"><LuAudioLines size={13} aria-hidden="true" /><span>Audio</span></div>}
                   <div className="whitespace-pre-wrap">{text}</div>
@@ -688,54 +392,6 @@ export function Chat({
                       ))}
                     </div>
                   )}
-                </div>
-                {/* Only where it can be done: taking a message out from under a
-                    run that is answering it leaves the agent replying to
-                    something that no longer exists. Sending it again is fine —
-                    it just queues, like any other message. */}
-                <div className="flex items-center gap-0.5 opacity-0 transition focus-within:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100">
-                  {item.id === lastSaid ? (
-                    // Retry: the same as editing without changing a word. After
-                    // a Stop this is what clears the half-finished answer out of
-                    // the agent's memory instead of stacking a second question
-                    // on top of it.
-                    <MessageAction
-                      label={
-                        running
-                          ? "Stop the run to retry"
-                          : "Retry — drops the reply and sends this message again"
-                      }
-                      disabled={running}
-                      onClick={() => attempt(() => onEditMessage(item.seq, text))}
-                    >
-                      <LuRotateCw className="h-3 w-3" />
-                    </MessageAction>
-                  ) : (
-                    <MessageAction
-                      label="Send again as a new message"
-                      onClick={() => attempt(() => onSend(text))}
-                    >
-                      <LuRotateCw className="h-3 w-3" />
-                    </MessageAction>
-                  )}
-                  <MessageAction
-                    label={running ? "Stop the run to edit" : "Edit — replaces this message and everything after it"}
-                    disabled={running}
-                    onClick={() => setEditing(item.seq)}
-                  >
-                    <LuPencil className="h-3 w-3" />
-                  </MessageAction>
-                  <MessageAction
-                    label={running ? "Stop the run to delete" : "Delete this message and the reply to it"}
-                    disabled={running}
-                    danger
-                    onClick={() => {
-                      if (confirm("Delete this message and the agent's reply to it? The agent forgets it too."))
-                        attempt(() => onDeleteMessage(item.seq));
-                    }}
-                  >
-                    <LuTrash2 className="h-3 w-3" />
-                  </MessageAction>
                 </div>
               </div>
             );
@@ -806,10 +462,8 @@ export function Chat({
           );
         })}
 
-          {actionError && (
-            <div className="rounded-lg bg-danger/10 px-3 py-2 text-xs text-danger">{actionError}</div>
-          )}
-          {!loading && running && phase && <ActivityLine phase={phase} now={now} />}
+          {running && phase && <ActivityLine phase={phase} now={now} />}
+          <div ref={bottomRef} />
         </div>
       </div>
 
@@ -822,14 +476,13 @@ export function Chat({
       >
         <div className="prompt-shell relative mx-auto w-full max-w-3xl">
         {matches.length > 0 && (
-          <div className="absolute bottom-full left-0 right-0 mb-2 max-h-[min(16rem,35dvh)] overflow-y-auto overscroll-contain rounded-xl border border-line bg-surface shadow-pop">
+          <div className="absolute bottom-full left-0 right-0 mb-2 overflow-hidden rounded-xl border border-line bg-surface shadow-pop">
             {matches.map((c) => (
               <button
                 key={c.name}
                 type="button"
-                onClick={(e) => {
+                onMouseDown={(e) => {
                   e.preventDefault();
-                  caret.current = null;
                   setInput(`/${c.name} `);
                 }}
                 className="flex w-full items-baseline gap-2 px-3 py-2 text-left transition hover:bg-fg/5"
@@ -841,41 +494,9 @@ export function Chat({
             ))}
           </div>
         )}
-        <button
-          type="button"
-          onPointerDown={startComposerResize}
-          onKeyDown={(event) => {
-            if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
-            event.preventDefault();
-            const maxHeight = Math.round(window.innerHeight * 0.45);
-            const direction = event.key === "ArrowUp" ? 16 : -16;
-            const nextHeight = Math.max(
-              MIN_COMPOSER_HEIGHT,
-              Math.min(maxHeight, composerHeight + direction),
-            );
-            setComposerHeight(nextHeight);
-            persistComposerHeight(nextHeight);
-          }}
-          aria-label="Resize message composer vertically"
-          aria-valuemin={MIN_COMPOSER_HEIGHT}
-          aria-valuemax={Math.round(window.innerHeight * 0.45)}
-          aria-valuenow={Math.round(composerHeight)}
-          title="Drag up or down to resize"
-          className="group flex h-3 w-full touch-none cursor-ns-resize items-center justify-center"
-        >
-          <span className="h-1 w-12 rounded-full bg-fg/15 transition group-hover:bg-accent/60" />
-        </button>
-        <DictationStrip dictation={dictation} />
         <textarea
-          ref={box}
           value={input}
-          onChange={(e) => {
-            caret.current = { start: e.target.selectionStart, end: e.target.selectionEnd };
-            setInput(e.target.value);
-          }}
-          onSelect={(e) => {
-            caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd };
-          }}
+          onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
@@ -883,16 +504,9 @@ export function Chat({
             }
           }}
           rows={2}
-          placeholder={
-            dictation.active
-              ? "Speak — your words appear here…"
-              : running
-                ? "pi is working — send to queue a follow-up…"
-                : "Describe the task…"
-          }
+          placeholder={running ? "pi is working — send to queue a follow-up…" : "Describe the task…"}
           aria-label="Message"
           className="prompt-input"
-            style={{ height: composerHeight, minHeight: MIN_COMPOSER_HEIGHT, maxHeight: "45vh" }}
         />
           <ComposerBar
             sessionId={session.id}
@@ -901,7 +515,6 @@ export function Chat({
             panelRequest={panelRequest}
             onPanelConsumed={() => setPanelRequest(null)}
             actions={<>
-              <DictationButton dictation={dictation} />
               <VoiceControl canvasOpen={canvasOpen} onCanvasMinimize={()=>setCanvasOpen(false)} onCanvasToggle={()=>setCanvasOpen(value=>!value)} key={session.id} sessionId={session.id} items={items} running={running} onSend={onSend} onAbort={onAbort} stageTarget={voiceHost} onModeChange={setVoiceMode} title={session.title} browserAvailable={browserUp} browserActivity={latestBrowserActivity(events)} terminalActivity={latestTerminalActivity(events)} toolEvents={events} />
               <SpeakReplies sessionId={session.id} items={items} voiceActive={voiceMode} />
               {running && !input.trim() ? <button type="button" aria-label="Stop generation" title="Stop generation" onClick={onAbort} className="prompt-action prompt-stop">
@@ -915,8 +528,6 @@ export function Chat({
         </div>
       </form>
       </div>
-
-      {showFiles && <FilesPanel key={session.workspace} workspace={workspaceName} />}
 
       {/* Beside the conversation rather than above it: the page changing while
           the agent explains what it is doing is the thing worth seeing, and a
@@ -997,98 +608,6 @@ export function Chat({
           </aside>
         </>
       )}
-      </div>
-    </div>
-  );
-}
-
-function MessageAction({
-  label,
-  onClick,
-  disabled,
-  danger,
-  children,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled?: boolean;
-  danger?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-      className={`rounded p-1.5 text-fg-faint transition disabled:cursor-not-allowed disabled:opacity-40 ${
-        danger ? "hover:text-danger" : "hover:text-accent"
-      }`}
-    >
-      {children}
-    </button>
-  );
-}
-
-/** A sent message, opened for rewriting in place. */
-function MessageEditor({
-  initial,
-  onSave,
-  onCancel,
-}: {
-  initial: string;
-  onSave: (text: string) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const [value, setValue] = useState(initial);
-  const [saving, setSaving] = useState(false);
-  const changed = value.trim() !== initial.trim();
-
-  const save = async () => {
-    if (!value.trim() || !changed || saving) return;
-    setSaving(true);
-    try {
-      await onSave(value.trim());
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="w-full max-w-[80%] rounded-2xl bg-accent/10 p-2 ring-1 ring-inset ring-accent/30">
-      <textarea
-        autoFocus
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Escape") onCancel();
-          if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            save();
-          }
-        }}
-        rows={Math.min(10, Math.max(2, value.split("\n").length))}
-        aria-label="Edit message"
-        className="w-full resize-none bg-transparent px-1.5 py-1 text-sm text-fg outline-none"
-      />
-      <div className="mt-1 flex items-center gap-2 px-1">
-        <span className="text-[11px] text-fg-faint">Replaces this message and everything after it.</span>
-        <button
-          type="button"
-          onClick={onCancel}
-          className="ml-auto rounded-lg px-2.5 py-1 text-xs text-fg-muted transition hover:bg-fg/5"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={save}
-          disabled={saving || !changed || !value.trim()}
-          className="rounded-lg bg-accent/15 px-2.5 py-1 text-xs text-accent ring-1 ring-inset ring-accent/25 transition hover:bg-accent/25 disabled:opacity-40"
-        >
-          {saving ? "Sending…" : "Send"}
-        </button>
       </div>
     </div>
   );

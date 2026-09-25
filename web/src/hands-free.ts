@@ -25,6 +25,7 @@ export interface VoiceIO {
   send: (text: string) => Promise<void>;
   abort: () => Promise<void>;
   agentRunning: () => boolean;
+  speaking: () => boolean;
   synthesize: (text: string, signal: AbortSignal, kind?:'reply'|'status') => Promise<PreparedSpeech>;
   trace?: (name:string)=>void;
   phase: (phase: VoicePhase) => void;
@@ -76,7 +77,8 @@ export class HandsFreeVoice {
   }
   private state() {
     if (!this.alive) return;
-    const phase = this.hearing ? "Hearing you" : this.compacting ? "Compacting context" : this.processing && !this.sending ? "Transcribing" : this.pipeline.busy || this.thinkingPipeline.busy ? "Speaking" : this.io.agentRunning() || this.sending ? "Thinking" : "Listening";
+    const speaking = this.io.speaking?.() ?? false;
+    const phase = this.hearing && !speaking ? "Hearing you" : this.compacting ? "Compacting context" : this.processing && !this.sending ? "Transcribing" : this.pipeline.busy || this.thinkingPipeline.busy || speaking ? "Speaking" : this.io.agentRunning() || this.sending ? "Thinking" : "Listening";
     this.io.phase(phase);
     if (this.io.statusSpeech === false || this.io.sequential || phase !== "Thinking" || !this.acceptingReplies || this.output.length) this.clearThinkingTimer();
     else if (!this.thinkingAnnounced && !this.thinkingTimer && Date.now() - this.lastThinkingAt >= 20000) {

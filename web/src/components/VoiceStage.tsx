@@ -175,8 +175,9 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
       {!shown && !terminalShown && transcript && (input || phase === "Transcribing") && <p className="voice-live-transcript" aria-label="Live transcription">{transcript}</p>}
 
       <div className="voice-stage-controls">
-        <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={muted ? 'Unmute microphone' : 'Mute microphone'} aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>
+        <div className="voice-status voice-status-stack" role="status"><span />{phase === 'Compacting context' ? phase : thought && (shown || terminalShown) ? 'Thinking' : status}</div>
         <button ref={end} type="button" className="voice-stage-action voice-end" title="End voice mode" aria-label="End voice mode" onClick={onEnd}><LuX /></button>
+        <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={muted ? 'Unmute microphone' : 'Mute microphone'} aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>
       </div>
     </div>
     {(error || browserError) && <p role="alert" className="voice-stage-error">{error || browserError}</p>}

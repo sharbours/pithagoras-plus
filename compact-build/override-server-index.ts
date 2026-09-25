@@ -1,4 +1,3 @@
-import { bindHost, loginThrottle, portalSecurityHeaders } from "./http-security.js";
 import { canvasesRouter } from "./api/canvases.js";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
@@ -32,12 +31,10 @@ import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
 import { channelsRouter } from "./api/channels.js";
 import { routinesRouter } from "./api/routines.js";
-import { filesRouter } from "./api/files.js";
 import { skillsRouter } from "./api/skills.js";
 import { mcpRouter } from "./api/mcp.js";
 import { peopleRouter } from "./api/people.js";
 import { voiceRouter } from "./api/voice.js";
-import { approvalsRouter } from "./api/approvals.js";
 import { browserRouter } from "./api/browser.js";
 import { terminalRouter } from "./api/terminal.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
@@ -54,13 +51,12 @@ import {
 } from "./pi-settings.js";
 import { eventTime, getDb } from "./db.js";
 import { getBuiltinCommands } from "./pi/builtins.js";
-import { SessionEditError } from "./pi/session-edit.js";
 import { isValidSlug, slugify } from "./slug.js";
 import { getSettingDefaults, getSettings, getStoredSettings, setSettings } from "./db.js";
 
-// WORKSPACE_ROOT is the new name; WORKSPACES_DIR still works for existing deploys.
+// WORKSPACE_ROOT is the new name; WORKSPACE_ROOT still works for existing deploys.
 const WORKSPACE_ROOT = path.resolve(
-  process.env.WORKSPACE_ROOT || process.env.WORKSPACES_DIR || "/workspaces"
+  process.env.WORKSPACE_ROOT || process.env.WORKSPACE_ROOT || "/workspaces"
 );
 const PORT = Number(process.env.PORT || 4100);
 /**
@@ -85,7 +81,7 @@ app.get("/api/auth/status", (req, res) => {
   res.json({ authRequired: authEnabled, authed: isAuthed(req) });
 });
 
-app.post("/api/auth/login", loginThrottle(), (req, res) => {
+app.post("/api/auth/login", (req, res) => {
   if (!authEnabled) return res.json({ ok: true });
   if (!checkPassword(req.body?.password)) {
     return res.status(401).json({ error: "Wrong password" });
@@ -391,36 +387,6 @@ app.post("/api/sessions/:id/prompt", async (req, res) => {
   }
 });
 
-// --- editing the conversation ---
-
-const editStatus = { busy: 409, missing: 404 } as const;
-
-/** Removes a message and the agent's answer to it. */
-app.delete("/api/sessions/:id/messages/:seq", async (req, res) => {
-  try {
-    await sessions.removeMessage(req.params.id, Number(req.params.seq), "turn");
-    res.json({ ok: true });
-  } catch (e) {
-    if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
-    res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
-  }
-});
-
-/** Replaces a message: it and everything after it are dropped, and the new text is sent. */
-app.post("/api/sessions/:id/messages/:seq/edit", async (req, res) => {
-  const message = req.body?.message;
-  if (typeof message !== "string" || !message.trim()) {
-    return res.status(400).json({ error: "message required" });
-  }
-  try {
-    await sessions.editMessage(req.params.id, Number(req.params.seq), message);
-    res.json({ ok: true, status: "running" });
-  } catch (e) {
-    if (!(e instanceof SessionEditError)) return res.status(500).json({ error: (e as Error).message });
-    res.status(editStatus[e.code as keyof typeof editStatus] ?? 422).json({ error: e.message });
-  }
-});
-
 /** The browser answering a dialog an extension is waiting on. */
 app.post("/api/sessions/:id/ui-response", (req, res) => {
   const session = getSession(req.params.id);
@@ -514,7 +480,7 @@ app.post("/api/sessions/:id/config", async (req, res) => {
   try {
     const client = await sessions.client(session.id);
     if (typeof modelId === "string" && modelId) {
-      await client.setModel(provider || session.provider || getSettings().provider, modelId);
+      await client.setModel(provider || getSettings().provider, modelId);
       applied.push("model");
     }
     if (typeof thinkingLevel === "string" && thinkingLevel) {
@@ -593,12 +559,10 @@ app.use("/api", extensionsRouter());
 app.use("/api", channelsRouter());
 app.use("/api", routinesRouter());
 app.use("/api", skillsRouter());
-app.use("/api", filesRouter());
 app.use("/api", mcpRouter());
 app.use("/api", peopleRouter());
 app.use("/api", browserRouter());
 app.use("/api", voiceRouter());
-app.use("/api", approvalsRouter());
 app.use("/api", terminalRouter());
 app.use("/api", canvasesRouter());
 // Before the SPA fallback, which answers everything that is not /api.
@@ -644,7 +608,7 @@ app.get("/api/sessions/:id/events", (req, res) => {
   });
 
   const write = (row: { seq: number; type: string; payload: string; created_at?: string }) => {
-    res.write(`${row.seq > 0 ? `id: ${row.seq}\n` : ""}data: ${JSON.stringify({
+    res.write(`id: ${row.seq}\ndata: ${JSON.stringify({
       seq: row.seq,
       type: row.type,
       // What the activity line counts from, so a refresh mid-run still knows
@@ -653,9 +617,6 @@ app.get("/api/sessions/:id/events", (req, res) => {
       payload: JSON.parse(row.payload),
     })}\n\n`);
   };
-
-  // Replace stale in-memory deltas before durable replay, then restore the current snapshot.
-  res.write("event: live-reset\ndata: {}\n\n");
 
   // A fresh load gets the end of the conversation, not the beginning. Replaying
   // from zero and stopping at the batch limit is how a long session came back
@@ -676,7 +637,6 @@ app.get("/api/sessions/:id/events", (req, res) => {
     }
     if (batch.length < 5000) break;
   }
-  for (const row of sessions.liveSnapshot(session.id)) write(row);
   res.write(`event: caught-up\ndata: ${JSON.stringify({ seq: lastSent })}\n\n`);
 
   const onEvent = (row: { seq: number; type: string; payload: string; created_at?: string }) => {
@@ -704,7 +664,6 @@ app.get("/api/sessions/:id/events", (req, res) => {
 
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
 if (existsSync(webDist)) {
-  app.use(portalSecurityHeaders);
   app.use(express.static(webDist));
   app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
 }
@@ -730,7 +689,7 @@ const tls =
 
 const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).listen(
   PORT,
-  bindHost(process.env.PORTAL_PASSWORD, process.env.ALLOW_OPEN),
+  "0.0.0.0",
   () => {
   console.log(`pithagoras listening on :${PORT}${tls ? " (https)" : ""}`);
   console.log(`  local bin: ${BIN_DIR}`);
@@ -740,7 +699,8 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
 
   // Enabled channels come up with the server, so a restart does not silently
   // leave the agent unreachable.
-  // Recurring schedules wait for their next slot; overdue one-off routines catch up.
+  // Schedules resume with the server; a routine due while it was down does not
+  // fire retroactively, it simply waits for its next slot.
   routineSupervisor.start();
 
   channelSupervisor

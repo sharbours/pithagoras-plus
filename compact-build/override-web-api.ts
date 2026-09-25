@@ -120,19 +120,6 @@ export interface CompactionSettings {
   keepRecentTokens: number;
 }
 
-export interface FileEntry {
-  name: string;
-  type: "dir" | "file";
-  size: number;
-  mtime: number;
-}
-
-export interface FileContent {
-  binary: boolean;
-  size: number;
-  content?: string;
-}
-
 export interface PortalEvent {
   seq: number;
   type: string;
@@ -158,34 +145,11 @@ export interface VoiceConfig {
   statusSpeech?: boolean;
   pipelineMode?: "parallel" | "sequential";
   vad?: typeof DEFAULT_VAD;
-  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp" | "chatterbox"; sttModel?: string; exaggeration?: number;
+  enabled: boolean; lazyLoad?: boolean; managed?: boolean; whisperUrl: string; breezeUrl: string; instruction: string; voice?: string; language?: string; cfgScale?: number; runtime?: "breeze" | "audio-cpp";
 }
 
 export interface VoiceInstallStatus { available: boolean; state: string; busy: boolean; progress: string; error: string; }
 export const api = {
-
-  listFiles: (workspace: string, dirPath: string) =>
-    json<{ path: string; entries: FileEntry[] }>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/files?path=${encodeURIComponent(dirPath)}`
-    ),
-  readFile: (workspace: string, filePath: string) =>
-    json<FileContent>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/file?path=${encodeURIComponent(filePath)}`
-    ),
-  saveFile: (workspace: string, filePath: string, content: string) =>
-    json<{ ok: true; size: number; mtime: number }>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/file?path=${encodeURIComponent(filePath)}`,
-      { method: "PUT", body: JSON.stringify({ content }) }
-    ),
-  deleteFile: (workspace: string, filePath: string) =>
-    json<{ ok: true }>(
-      `/api/workspaces/${encodeURIComponent(workspace)}/file?path=${encodeURIComponent(filePath)}`,
-      { method: "DELETE" }
-    ),
-  fileDownloadUrl: (workspace: string, filePath: string) =>
-    `/api/workspaces/${encodeURIComponent(workspace)}/file?path=${encodeURIComponent(filePath)}&download=1`,
-  archiveDownloadUrl: (workspace: string) =>
-    `/api/workspaces/${encodeURIComponent(workspace)}/archive`,
   voiceInstallStatus: () => json<VoiceInstallStatus>('/api/voice/install'),
   voiceAction: (action: 'install' | 'start' | 'stop') => json<{ok:boolean}>(`/api/voice/${action}`, {method:'POST'}),
   connectVoice: () => json<VoiceConfig>('/api/voice/connect', {method:'POST'}),
@@ -211,17 +175,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ message, ...(options?.voice ? { voice: true } : {}) }),
     }),
-  /** Removes a message and the agent's answer to it — from the agent's memory too. */
-  deleteMessage: (id: string, seq: number) =>
-    json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}`, { method: "DELETE" }),
-  /** Replaces a message: it and everything after it are dropped, and the new text is sent. */
-  editMessage: (id: string, seq: number, message: string) =>
-    json<{ ok: true }>(`/api/sessions/${id}/messages/${seq}/edit`, {
-      method: "POST",
-      body: JSON.stringify({ message }),
-    }),
   respondUi: (sessionId: string, id: string, payload: { value?: unknown; cancelled?: boolean }) =>
-    json<{ ok: boolean; note?: string }>(`/api/sessions/${sessionId}/ui-response`, {
+    json<{ ok: boolean }>(`/api/sessions/${sessionId}/ui-response`, {
       method: "POST",
       body: JSON.stringify({ id, ...payload }),
     }),
@@ -438,13 +393,6 @@ export const api = {
     json<{ ok: true; applied: string[]; state: PiState }>(`/api/sessions/${id}/config`, {
       method: "POST",
       body: JSON.stringify(patch),
-    }),
-  /** Pending Hermes tool-permission requests (the permanent PermissionBar). */
-  approvals: () => json<{ approvals: { runId: string; requestId: string | null; command: string; description: string; patternKey: string | null; choices: string[]; since: number }[] }>("/api/approvals"),
-  resolveApproval: (runId: string, choice: "once" | "always" | "deny") =>
-    json<{ ok: true; runId: string; choice: string }>("/api/approvals/resolve", {
-      method: "POST",
-      body: JSON.stringify({ runId, choice }),
     }),
   compact: (id: string) =>
     json<{ ok: true }>(`/api/sessions/${id}/compact`, { method: "POST" }),

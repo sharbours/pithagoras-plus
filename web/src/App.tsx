@@ -2,6 +2,7 @@ import { LuMenu, LuX } from "react-icons/lu";
 import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { initCompact, isCompact, subscribeCompact } from "./compact-mode";
 import { api, type PortalEvent, type Session, type SessionStatus, type Workspace } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
@@ -21,6 +22,11 @@ const LEGACY_TABS: Record<string, Tab> = { session: "general", global: "general"
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
+
+  // Small-display mode is installed at the top level (not the Shell) so the
+  // class is already set when the login page paints — the device lands on
+  // login, and the compact layout should be there from the first tap.
+  useEffect(() => initCompact(), []);
 
   useEffect(() => {
     api
@@ -75,6 +81,14 @@ function Shell({
   const { sessionId, tab } = useParams<{ sessionId?: string; tab?: string }>();
   const navigate = useNavigate();
   const [mobileNav, setMobileNav] = useState(false);
+  // Small-display mode: the class it toggles drives the compact CSS; the
+  // sidebar is dropped by React (the compact layout has no room for it).
+  const [compact, setCompact] = useState(isCompact());
+  useEffect(() => {
+    const stop = initCompact();
+    const unsub = subscribeCompact(() => setCompact(isCompact()));
+    return () => { stop(); unsub(); };
+  }, []);
   useEffect(() => { setMobileNav(false); }, [sessionId, view, settings]);
   useEffect(() => {
     const escape = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileNav(false); };
@@ -276,11 +290,24 @@ function Shell({
 
   const active = listed ?? (other?.id === sessionId ? other : null);
 
+  // A fresh chat on a small display: same workspace, named from the time.
+  const startNewChat = useCallback(async (workspace: string) => {
+    const now = new Date();
+    const title = now.toLocaleString(undefined, { month: "short", day: "numeric" })
+      + " "
+      + now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+    const s = await api.createSession(workspace, title);
+    await refreshSessions();
+    setMobileNav(false);
+    navigate(`/s/${s.id}`);
+  }, [refreshSessions, navigate]);
+
   return (
     <div className="flex h-[100dvh] min-h-0 overflow-hidden bg-canvas">
       {mobileNav && <button aria-label="Dismiss navigation" onClick={() => setMobileNav(false)} className="fixed inset-0 z-40 bg-black/50 md:hidden" />}
       <div id="mobile-navigation" className={`${mobileNav ? "fixed inset-y-0 left-0 z-50 flex" : "hidden"} h-full shrink-0 md:static md:z-auto md:flex`}>
       {mobileNav && <button type="button" aria-label="Close navigation" onClick={() => setMobileNav(false)} className="absolute right-2 top-3 z-20 rounded-lg p-2 text-fg md:hidden"><LuX size={20}/></button>}
+      {!compact && (
       <Sidebar
         forceExpanded={mobileNav}
         sessions={sessions}
@@ -320,6 +347,7 @@ function Shell({
           return created;
         }}
       />
+      )}
 
       </div>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -389,15 +417,13 @@ function Shell({
               if (name === "settings") {
                 navigate(`/s/${active.id}/settings/general`);
               } else if (name === "new") {
-                const s = await api.createSession(active.workspace);
-                await refreshSessions();
-                setMobileNav(false);
-          navigate(`/s/${s.id}`);
+                await startNewChat(active.workspace);
               } else if (name === "name" && args.trim()) {
                 await api.renameSession(active.id, args.trim());
                 refreshSessions();
               }
             }}
+            onCreateNew={() => startNewChat(active.workspace)}
           />
         ) : (
           <EmptyState hasSessions={sessions.length > 0} />
