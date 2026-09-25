@@ -1,8 +1,9 @@
 <p align="center">
-  <img src="assets/hero.png" alt="Pithagoras" width="620">
+
 </p>
 
 <p align="center">
+  Modified version of Pithagora from the original author. Uses a custom avatar plugin that supports VRM models for interactive dialogue with local LLMs.
   A web front end for the <a href="https://github.com/earendil-works/pi">pi coding agent</a>, built to be
   left alone.<br>
   <strong>Give it a task, close the browser, come back later and read what it did.</strong>
