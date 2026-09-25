@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Modified version of Pithagoras from the original author. Uses a custom avatar plugin that supports VRM models for interactive dialogue with local LLMs.
+  Modified version of Pithagoras from the original author. Uses a custom avatar plugin that supports VRM models for interactive dialogue with local LLMs.<br>
   A web front end for the <a href="https://github.com/earendil-works/pi">pi coding agent</a>, built to be
   left alone.<br>
   <strong>Give it a task, close the browser, come back later and read what it did.</strong>
