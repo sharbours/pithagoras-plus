@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -e
+cd /opt/pithagoras-build
+docker compose -p pithagoras -f docker-compose.yml up -d --no-build portal 2>&1 | tail -3
+NEWPORTAL=$(docker inspect --format "{{.Id}}" pithagoras-portal 2>/dev/null || true)
+if [ -n "$NEWPORTAL" ] && [ -f /tmp/pithagoras-portal-id ]; then
+  OLD=$(cat /tmp/pithagoras-portal-id)
+  if [ "$OLD" != "$NEWPORTAL" ] && docker ps -a --format "{{.Names}}" | grep -q "^pithagoras-voice$"; then
+    docker rm -f pithagoras-voice 2>/dev/null || true
+    sleep 2
+  fi
+fi
+echo "$NEWPORTAL" > /tmp/pithagoras-portal-id
