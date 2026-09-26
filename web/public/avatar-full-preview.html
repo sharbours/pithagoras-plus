@@ -71,10 +71,6 @@ body{font-family:"M PLUS Rounded 1c","Nunito",ui-rounded,"Segoe UI",system-ui,sa
   const frame = document.getElementById("frame");
   const post = (m) => frame.contentWindow?.postMessage({ avatar: m }, location.origin);
   let full = false, size = { x: 100, y: 100 };
-  try {
-    const saved = JSON.parse(localStorage.getItem("voiceAvatarSize") || "");
-    if (saved && +saved.x && +saved.y) size = { x: Math.max(20, Math.min(100, +saved.x)), y: Math.max(20, Math.min(100, +saved.y)) };
-  } catch {}
   function setFull(on) {
     full = on;
     stage.classList.toggle("is-full", on);
@@ -84,17 +80,16 @@ body{font-family:"M PLUS Rounded 1c","Nunito",ui-rounded,"Segoe UI",system-ui,sa
     size = { x: Math.max(20, Math.min(100, Math.round(+x || 100))), y: Math.max(20, Math.min(100, Math.round(+y || 100))) };
     stage.style.setProperty("--avatar-x", size.x);
     stage.style.setProperty("--avatar-y", size.y);
-    localStorage.setItem("voiceAvatarSize", JSON.stringify(size));
     setFull(true);               // sizing the panel implies the enlarged view
     post({ panelSize: size });   // mirror the applied size onto the avatar page's sliders
   }
-  // The avatar page's ⛶ asks its host (this window) to enlarge; its ✕ / Esc collapse it;
-  // its X/Y sliders ask for a specific panel size.
+  // The avatar page's ⛶ always maximizes (near-fullscreen, 100/100); its ✕ / Esc
+  // collapse it; its X/Y sliders ask for a specific size while it's open.
   window.addEventListener("message", (e) => {
     const req = e.data && e.data.avatarRequest;
     if (!req || typeof req.action !== "string") return;
     if (e.origin !== location.origin && e.origin !== "null") return;
-    if (req.action === "expand") setFull(true);
+    if (req.action === "expand") setSize(100, 100);
     else if (req.action === "collapse") setFull(false);
     else if (req.action === "size") setSize(req.x, req.y);
   });

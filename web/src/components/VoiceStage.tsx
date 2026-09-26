@@ -110,27 +110,20 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
   // its own ✕ shows.
   const [avatarFull, setAvatarFull] = useState(false);
   // X/Y panel size, in % of the voice stage, set by the avatar page's sliders next
-  // to ⛶ (post {action:"size"}). 100/100 is the original near-fullscreen panel;
-  // the choice is remembered per browser and reused the next time ⛶ expands.
-  const [avatarSize, setAvatarSize] = useState<{ x: number; y: number }>(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("voiceAvatarSize") || "");
-      if (saved && +saved.x && +saved.y) return { x: Math.max(20, Math.min(100, +saved.x)), y: Math.max(20, Math.min(100, +saved.y)) };
-    } catch {}
-    return { x: 100, y: 100 };
-  });
+  // to ⛶ (post {action:"size"}). Transient UI state, not a saved preference: ⛶ is
+  // "enlarge to nearly full screen" and always reopens at 100/100; the sliders
+  // adjust the panel while it's open. 100/100 is the near-fullscreen panel.
+  const [avatarSize, setAvatarSize] = useState<{ x: number; y: number }>({ x: 100, y: 100 });
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const req = event.data && event.data.avatarRequest;
       if (!req || typeof req.action !== "string") return;
       // Only honour requests from our own avatar frame (same-origin portal origin).
       if (event.origin !== location.origin && event.origin !== "null") return;
-      if (req.action === "expand") { setAvatarFull(true); return; }
+      if (req.action === "expand") { setAvatarSize({ x: 100, y: 100 }); setAvatarFull(true); return; }   // ⛶ always maximizes
       if (req.action === "collapse") { setAvatarFull(false); return; }
       if (req.action === "size") {
-        const size = { x: Math.max(20, Math.min(100, Math.round(+req.x || 100))), y: Math.max(20, Math.min(100, Math.round(+req.y || 100))) };
-        setAvatarSize(size);
-        localStorage.setItem("voiceAvatarSize", JSON.stringify(size));
+        setAvatarSize({ x: Math.max(20, Math.min(100, Math.round(+req.x || 100))), y: Math.max(20, Math.min(100, Math.round(+req.y || 100))) });
         setAvatarFull(true);   // sizing the panel implies the enlarged view
       }
     };
