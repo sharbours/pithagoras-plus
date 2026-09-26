@@ -30,10 +30,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # uv, so the agent can run Python tooling — a large share of MCP servers are
 # Python and are launched with uvx. Static musl binaries, no Python needed to
 # install them; uv fetches a managed interpreter on first use, into HOME on the
-# data volume. Pinned so a rebuild does not silently change the toolchain.
+# Pinned so a rebuild does not silently change the toolchain.
 COPY --from=ghcr.io/astral-sh/uv:0.12.1 /uv /uvx /usr/local/bin/
 
-RUN npm install -g @earendil-works/pi-coding-agent@latest
+# Pinned to the version in the running .210 production image (2026-09-26):
+# @latest (0.87.x) is a silent two-version framework bump that would confound
+# avatar validation and any later voice debugging. Bump deliberately, with a
+# reason, when the time comes.
+RUN npm install -g @earendil-works/pi-coding-agent@0.85.1
 
 COPY package.json package-lock.json* ./
 COPY server/package.json server/
