@@ -48,7 +48,11 @@ RUN npm install -g @earendil-works/pi-coding-agent@0.85.1
 
 COPY package.json package-lock.json* ./
 COPY server/package.json server/
-RUN npm install --omit=dev -w server
+# --ignore-scripts: better-sqlite3 ships prebuilt .node binaries in its tarball
+# and loads them without compiling. Skipping install scripts keeps the runtime
+# image slim (no compiler) instead of triggering node-gyp, which this stage has
+# no toolchain for. Mirrors the root Dockerfile's runtime install.
+RUN npm install --omit=dev -w server --ignore-scripts
 
 COPY --from=build /app/server/dist server/dist
 COPY --from=build /app/web/dist web/dist
