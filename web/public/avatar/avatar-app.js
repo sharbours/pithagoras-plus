@@ -25,11 +25,17 @@ const store = {
    apart, and both headScreen() callers add the same pixel offset so emotes stay
    over the head. The background canvas is untouched (it still fills the stage). */
 let posFrac = 0.5;   // default until restore()/the picker runs
+// Character scale (50-100%): shrinks ONLY the character (2D SVG or 3D VRM) about its
+// feet. The background (#bgImage) and the panel (host X/Y, the iframe itself) are
+// separate layers and are never affected.
+let charScale = 1;   // 1 = full size; 0.5 = smallest the slider allows
 function applyPos() {
   const t = (posFrac - 0.5) * 100;             // % of the stage width (each layer is 100% wide)
+  const tf = `translateX(${t}%) scale(${charScale})`;
   for (const id of ["#svgAvatar", "#vrmCanvas"]) {
     const el = $(id); if (!el) continue;
-    el.style.transform = `translateX(${t}%)`;
+    el.style.transform = tf;
+    el.style.transformOrigin = "50% 100%";     // shrink about the feet, not the center
   }
 }
 // Shared handler for the position slider. Persists per browser and shifts the shared
@@ -41,6 +47,15 @@ function setPos(frac) {
   store.set("position", String(Math.round(posFrac * 100)));
   applyPos();
   const sel = $("#pickPos"); if (sel) sel.value = Math.round(posFrac * 100);
+}
+// Character-size slider: 50-100% of the default. Same persistence pattern as position —
+// the gear picker is the single control, on the standalone page and in the voice stage.
+function setScale(pct) {
+  charScale = clamp(pct, 50, 100) / 100;
+  store.set("scale", String(Math.round(charScale * 100)));
+  applyPos();
+  const sel = $("#pickScale"); if (sel) sel.value = Math.round(charScale * 100);
+  const val = $("#pickScaleVal"); if (val) val.textContent = Math.round(charScale * 100) + "%";
 }
 // ---------------------------------------------------------------- near-fullscreen view
 // The ⛶ button (next to the gear) and the ✕ (upper-right) let the user pop the avatar
@@ -851,6 +866,9 @@ const SvgAvatar = (() => {
     if (!m) return { x: r.width * .65, y: r.height * .2 };
     const pt = svg.createSVGPoint(); pt.x = 292; pt.y = 104 + S.pose.hx * 26 - S.pose.by * 22;
     const s = pt.matrixTransform(m);
+    // getScreenCTM() already folds in the CSS transform (translateX + scale about the
+    // feet) that applyPos() puts on #svgAvatar, so the head anchor's on-screen position
+    // is already correct — the scale slider needs no change here.
     return { x: s.x - r.left + (posFrac - .5) * r.width, y: s.y - r.top };   // + the shared horizontal shift
   }
   return { apply, headScreen, show(v) { svg.style.display = v ? "" : "none"; } };
@@ -1144,7 +1162,14 @@ const VrmAvatar = (() => {
     if (!vrm) return { x: r.width * .65, y: r.height * .2 };
     const head = vrm.humanoid.getRawBoneNode("head"); const v = new THREE.Vector3();
     head.getWorldPosition(v); v.x += .13; v.y += .17; v.project(camera);
-    return { x: (v.x + 1) / 2 * r.width + (posFrac - .5) * r.width, y: (1 - v.y) / 2 * r.height };   // + the shared shift
+    // The 3D head position comes from the camera projection (the element's local frame),
+    // which does NOT go through getScreenCTM — so apply the layer's CSS transform
+    // (translateX + scale about the feet, origin 50% 100%) to it manually. At scale=1
+    // this reduces exactly to the original (x0 + shift, y0), so it's a no-op until the
+    // character is shrunk; when it is, the emote tracks the smaller head.
+    const W = r.width, H = r.height, k = charScale;
+    const x0 = (v.x + 1) / 2 * W, y0 = (1 - v.y) / 2 * H;
+    return { x: W / 2 + k * (x0 - W / 2) + (posFrac - .5) * W, y: H - k * (H - y0) };
   }
   function meta() { return vrm && vrm.meta; }
   return { load, apply, headScreen, frame, meta, lastLoad: () => lastLoad, get vrm() { return vrm; },
@@ -1459,7 +1484,7 @@ fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged =
    so it's remembered (localStorage / IndexedDB, same origin) and reaches the
    voice app over the existing message channel. */
 (function initPicker() {
-  const pc = $("#pickChar"), pf = $("#pickFraming"), pb = $("#pickBg"), pp = $("#pickPos"), st = $("#pickStatus");
+  const pc = $("#pickChar"), pf = $("#pickFraming"), pb = $("#pickBg"), pp = $("#pickPos"), ps = $("#pickScale"), st = $("#pickStatus");
   if (!pc || !pf || !pb || !st) return;   // not present in the full page build
   // Character list mirrors the main #charSelect (built-in + shipped + uploaded).
   const syncChar = () => {
@@ -1484,6 +1509,11 @@ fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged =
   if (savedPos != null) posFrac = clamp(+savedPos / 100, 0, 1);
   else if (EMBED) posFrac = 0.2;
   if (pp) pp.value = Math.round(posFrac * 100);
+  // Character size: full (100%) by default; a saved choice wins.
+  const savedScale = store.get("scale");
+  if (savedScale != null) charScale = clamp(+savedScale, 50, 100) / 100;
+  if (ps) { ps.value = Math.round(charScale * 100); const sv = $("#pickScaleVal"); if (sv) sv.textContent = Math.round(charScale * 100) + "%"; }
+  applyPos();
   syncChar(); syncBgs();
   $("#picker").hidden = false;
   $("#pickerToggle").onclick = () => $("#pickerBody").hidden = !$("#pickerBody").hidden;
@@ -1491,6 +1521,7 @@ fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged =
   pc.onchange = () => selectCharacter(pc.value);
   pf.onchange = () => { $("#framing").value = pf.value; VrmAvatar.frame(pf.value); store.set("framing", pf.value); };
   if (pp) pp.oninput = () => setPos(pp.value / 100);
+  if (ps) ps.oninput = () => setScale(+ps.value);
   pb.onchange = () => {
     if (!pb.value) { applyBackground(null); return; }
     if (pb.value === "upload") { log("Upload a new background image to replace the saved one."); $("#bgInput").click(); return; }
@@ -1590,6 +1621,10 @@ fillCharSelect();
   // the 2D and 3D character layer, so it works before the 3D stack finishes loading.
   const p0 = store.get("position");
   if (p0 != null) posFrac = clamp(+p0 / 100, 0, 1);
+  // Character size: honor a saved choice (full by default) so the restored character
+  // is the size the user last picked — matches what initPicker set on the picker.
+  const s0 = store.get("scale");
+  if (s0 != null) charScale = clamp(+s0, 50, 100) / 100;
   applyPos();
   if (framing) { $("#framing").value = framing; VrmAvatar.frame(framing); }
   const bid = store.get("background");
