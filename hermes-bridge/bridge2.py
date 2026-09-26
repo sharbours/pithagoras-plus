@@ -343,7 +343,12 @@ def _create_run(messages: list, stream: bool) -> str:
     for m in messages or []:
         role = m.get("role", "")
         text = _content_text(m.get("content"))
-        if role == "system":
+        # "developer" is what pi's OpenAI client sends as the system prompt for
+        # models it flags as reasoning (supportsDeveloperRole). Hermes applies
+        # `instructions` as an ephemeral system prompt, so both roles map here —
+        # a brain that is ever flagged reasoning otherwise loses its entire
+        # system prompt (including the avatar instructions) to this filter.
+        if role in ("system", "developer"):
             system = (system + "\n" + text).strip() if system else text
         elif role in ("user", "assistant"):
             hist.append({"role": role, "content": text})

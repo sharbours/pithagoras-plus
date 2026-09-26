@@ -194,7 +194,27 @@ class Handler(BaseHTTPRequestHandler):
         CRITICAL: forward the upstream framing header (Transfer-Encoding
         chunked for streams, Content-Length for JSON). Without it a
         keep-alive client cannot tell where the body ends and hangs —
-        this was the 2026-09-18 'chat hangs 90s' bug."""
+        this was the 2026-09-18 'chat hangs 90s' bug.
+
+        Hermes's /v1/chat/completions promotes role=="system" to the
+        agent's (ephemeral) system prompt, but any OTHER role — including
+        "developer" — is treated as ordinary conversation history. The
+        pi brain registers its models as reasoning models (pi-llama-cpp
+        defaults reasoning=true), so pi-ai sends its system prompt as
+        role "developer" — which Hermes would demote to history, so the
+        voice-mode rules (speaking style + avatar stage directions) would
+        never reach the system prompt. Normalize developer->system for
+        the hermes model only, before proxying.
+        """
+        try:
+            req = json.loads(body)
+            if isinstance(req, dict) and req.get("model") == MODEL_ID:
+                for m in req.get("messages") or []:
+                    if isinstance(m, dict) and m.get("role") == "developer":
+                        m["role"] = "system"
+                body = json.dumps(req).encode()
+        except (ValueError, TypeError):
+            pass  # malformed body: let Hermes return its own 400
         try:
             conn = http.client.HTTPConnection(HERMES_HOST, HERMES_PORT, timeout=300)
             headers = {
