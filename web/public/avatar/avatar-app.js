@@ -1465,11 +1465,24 @@ function resize() {
 }
 new ResizeObserver(resize).observe($("#stage"));
 function loop() {
+  // Re-arm the chain FIRST. The previous version returned early while the tab was
+  // hidden WITHOUT scheduling the next frame, so the single requestAnimationFrame
+  // that fired at the moment of backgrounding was consumed and never replaced —
+  // the character then sat frozen on its last frame until the page/iframe remounted
+  // (a new conversation). Always re-arm; while hidden the browser simply won't call
+  // us (no cost), and the one pending frame resumes the moment the tab is visible.
+  requestAnimationFrame(loop);
   if (hidden) return;                     // paused: tab hidden, nothing to draw
   const t = now(); const dt = Math.min(.05, (t - last) / 1000); last = t;
-  step(t, dt);
-  active.apply(dt);
-  requestAnimationFrame(loop);
+  try {
+    step(t, dt);
+    active.apply(dt);
+  } catch (err) {
+    // A single bad frame (a model missing a bone, a texture hiccup, …) must never
+    // take down the loop. Drop the frame, keep breathing; report the first error only.
+    last = now();
+    if (!window.__afErr) { window.__afErr = true; console.warn("avatar: a frame threw and was skipped:", err); }
+  }
 }
 fillCharSelect();
 // Restore the last character, framing and background (set in the full page or in
