@@ -1,6 +1,11 @@
 services:
   portal:
-    build: .
+    build:
+      # Production lineage: the compact-build Dockerfile (pi pinned,
+      # clean build of the merged tree). The root Dockerfile is the upstream base.
+      context: .
+      dockerfile: compact-build/Dockerfile
+    image: pithagoras-portal:compact-prod
     container_name: pithagoras
     restart: unless-stopped
     network_mode: host
