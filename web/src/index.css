@@ -153,7 +153,27 @@
    (header + status/thought dock) out of the way so the character owns the screen.
    The bottom mic/end/mute controls stay usable; the avatar page shows its own ✕ in
    the upper-right (with a stage-level ✕ here as a fallback) and Escape also closes. */
-.voice-stage.is-avatar-expanded { overflow: hidden; }
+/* Enlarged (near-fullscreen) avatar view: the STAGE becomes a page-level overlay
+   (fixed to the viewport, above the composer/canvas). The panel inside it then
+   scales against the whole page instead of the stage's sub-area, and the X/Y
+   sliders (next to ⛶) set any size from 20% up to the entire page (100/100).
+   The same iframe is reused, so the character and the live voice session carry
+   over; the ✕ (upper-right, in the panel), our fallback ✕ and Escape close it. */
+.voice-stage.is-avatar-expanded {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 999;
+  overflow: hidden;
+}
+/* The session workspace sets container-type (for cqw units), which turns it into a
+   containing block that traps fixed-position descendants. While the stage is the
+   page-level overlay, clear that so the stage's fixed:inset:0 resolves to the real
+   viewport instead of the workspace's sub-area box. (The workspace's cqw-based
+   canvas-panel sizing is invisible while the overlay covers it, and returns on
+   collapse.) */
+.session-workspace:has(.voice-stage.is-avatar-expanded) { container-type: normal; }
 .voice-stage.is-avatar-expanded .voice-presence {
   left: 0; top: 0; transform: none;
   width: calc((100% - 28px) * var(--avatar-x, 100) / 100);

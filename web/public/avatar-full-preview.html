@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Avatar Lab — full-view preview (voice-stage host)</title>
+<title>Avatar Lab — full-page overlay preview (voice-stage host)</title>
 <style>
 :root{
   --canvas:#0d0d12; --surface:#16161f; --line:#2a2a38; --fg:#ece9ff; --fg-muted:#8b86ad;
@@ -13,58 +13,98 @@
 html,body{height:100%;margin:0}
 body{font-family:"M PLUS Rounded 1c","Nunito",ui-rounded,"Segoe UI",system-ui,sans-serif;color:var(--fg);background:var(--canvas);overflow:hidden}
 
-/* Mimic the voice stage: a dark panel with the avatar in a square slot, centred. */
-.stage{position:relative;width:100%;height:100%;
-  background:radial-gradient(ellipse at 50% 42%, rgba(111,158,238,.07), transparent 62%), var(--canvas);}
-.presence{position:absolute;left:50%;top:49%;transform:translate(-50%,-50%);
-  width:min(92%,560px);max-width:92%;display:flex;flex-direction:column;align-items:center;
-  transition:all .6s cubic-bezier(.22,1,.36,1);}
-.avatar{width:100%;line-height:0;transition:width .6s cubic-bezier(.22,1,.36,1)}
+/* ---- Faithful copy of the production layout (App.tsx / Chat.tsx / index.css) ----
+   root: flex row -> [sidebar] [main] ; main: flex col -> [workspace];
+   workspace: flex col (container-type: inline-size) -> [voiceHost] [composer];
+   stage: relative + isolation + container-type: inline-size + overflow hidden (flex:1).
+   The stage is therefore a SUB-AREA of the page, like in production. */
+.root{display:flex;height:100dvh;overflow:hidden;background:var(--canvas)}
+.sidebar{width:220px;flex-shrink:0;border-right:1px solid var(--line);padding:14px;color:var(--fg-muted);font-size:13px}
+.sidebar b{color:var(--fg);font-size:15px;display:block;margin-bottom:10px}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.session-workspace{position:relative;flex:1;min-height:0;display:flex;flex-direction:column;container-type:inline-size}
+.voice-host{flex:1;min-height:0;display:flex;flex-direction:column}
+.composer{height:72px;flex-shrink:0;border-top:1px solid var(--line);display:flex;align-items:center;padding:0 18px;color:var(--fg-muted);font-size:13px;gap:10px}
+.composer .fake-input{flex:1;height:42px;border-radius:22px;border:1px solid var(--line);background:var(--surface);display:flex;align-items:center;padding:0 16px}
+.stage{position:relative;flex:1;min-height:360px;overflow:hidden;isolation:isolate;container-type:inline-size;
+  background:radial-gradient(ellipse at 50% 45%, rgba(111,158,238,.055), transparent 62%), var(--canvas);}
+
+/* small slot (as in production) */
+.presence{position:absolute;z-index:3;left:50%;top:49%;transform:translate(-50%,-50%);
+  width:380px;max-width:92%;display:flex;flex-direction:column;align-items:center;
+  transition:left .6s cubic-bezier(.22,1,.36,1),top .6s,width .6s,height .6s;}
+.avatar{width:100%;line-height:0}
 .avatar iframe{display:block;width:100%;aspect-ratio:1;height:auto;border:0;background:transparent}
-/* Near-fullscreen: the slot grows to a centred panel. --avatar-x / --avatar-y
-   (set by the host from the avatar page's X/Y sliders, 20-100) scale it; 100/100
-   is the original near-fullscreen panel. */
-.stage.is-full .presence{left:0;top:0;transform:none;
-  width:calc((100% - 24px) * var(--avatar-x, 100) / 100);
-  height:calc(100% * var(--avatar-y, 100) / 100);
-  max-width:calc((100% - 24px) * var(--avatar-x, 100) / 100);
-  padding:14px;
-  display:flex;align-items:center;justify-content:center;
-  background:color-mix(in srgb, var(--surface) 55%, transparent);
-  border:1px solid var(--line);border-radius:24px;backdrop-filter:blur(8px);
-  box-shadow:0 30px 90px #0007;}
+
+/* ---- Enlarged = page-level overlay (mirrors .voice-stage.is-avatar-expanded) ---- */
+.stage.is-full{position:fixed;inset:0;width:100vw;height:100vh;z-index:999;overflow:hidden}
+/* mirror .session-workspace:has(.voice-stage.is-avatar-expanded){container-type:normal} */
+.session-workspace:has(.stage.is-full){container-type:normal}
+/* mirror .voice-stage.is-avatar-expanded .voice-presence (X/Y % of the stage=viewport) */
+.stage.is-full .presence{
+  left:0;top:0;transform:none;
+  width:calc((100% - 28px) * var(--avatar-x,100) / 100);
+  height:calc(100% * var(--avatar-y,100) / 100);
+  max-width:calc((100% - 28px) * var(--avatar-x,100) / 100);
+  display:flex;align-items:center;justify-content:center;padding:14px;
+  background:color-mix(in srgb, var(--surface) 62%, transparent);
+  border:1px solid var(--line);border-radius:24px;
+  box-shadow:0 30px 90px #0006;backdrop-filter:blur(10px);
+}
 .stage.is-full .avatar{width:100%;height:100%}
 .stage.is-full .avatar iframe{aspect-ratio:auto;height:100%}
+/* the mic/mute/end row floats over the panel's lower edge (mirrors production) */
+.stage-controls{display:none}
+.stage.is-full .stage-controls{
+  display:flex;gap:14px;position:absolute;left:50%;bottom:18px;transform:translateX(-50%);z-index:8;
+}
+.stage.is-full .stage-controls .dot{width:46px;height:46px;border-radius:50%;border:1px solid var(--line);background:var(--surface);display:grid;place-items:center;font-size:15px;cursor:pointer}
 
-/* The host's ✕ (upper-right) — mirrors the production voice-stage close button.
-   Only visible while the enlarged view is active. The avatar page's own ✕ is hidden
-   in this (in-iframe) context, so this is the single close control. */
-.close{position:absolute;top:14px;right:14px;z-index:20;width:42px;height:42px;border-radius:50%;
+/* host ✕ (upper-right) + hint (only while expanded) */
+.close{position:absolute;top:14px;right:14px;z-index:9999;width:42px;height:42px;border-radius:50%;
   border:1px solid var(--line);background:var(--surface);color:var(--fg);font-size:18px;line-height:1;
   cursor:pointer;display:grid;place-items:center;box-shadow:0 4px 18px #0006;
-  transition:background .2s,transform .2s,opacity .2s;opacity:0;pointer-events:none;}
-.close:hover{background:var(--accent);transform:translateY(-2px)}
+  transition:opacity .2s;opacity:0;pointer-events:none;}
+.close:hover{background:var(--accent)}
 .stage.is-full .close{opacity:1;pointer-events:auto}
-
-.hint{position:absolute;top:14px;left:14px;z-index:10;font-size:12px;color:var(--fg-muted);
+.hint{position:absolute;top:14px;left:14px;z-index:9998;font-size:12px;color:var(--fg-muted);
   background:color-mix(in srgb, var(--surface) 70%, transparent);border:1px solid var(--line);
-  border-radius:10px;padding:7px 11px;max-width:360px;line-height:1.5;}
+  border-radius:10px;padding:7px 11px;max-width:340px;line-height:1.5;opacity:0;pointer-events:none;transition:opacity .2s}
 .hint b{color:var(--fg)}
+.stage.is-full .hint{opacity:1}
 </style>
 </head>
 <body>
-  <div class="stage" id="stage">
-    <div class="hint">
-      <b>Full-view preview</b> — mirrors the production voice stage. Click the avatar's <b>⛶</b> button
-      (bottom-left, next to the gear) to enlarge the avatar to a near-fullscreen view, then use the
-      <b>X / Y sliders</b> beside it to set the panel's width and height. Close it with the
-      <b>✕</b> in the upper-right, or press <b>Esc</b>. The same iframe is reused, so your character,
-      framing, position and background carry over with no reload.
+  <div class="root">
+    <div class="sidebar"><b>◧ Pithagoras</b>
+      <div>Session list…</div>
+      <div style="opacity:.6;margin-top:6px">Workspace: home</div>
+      <div style="opacity:.55;margin-top:14px">(preview chrome — not part of the app)</div>
     </div>
-    <div class="presence">
-      <div class="avatar"><iframe id="frame" src="/avatar/index.html?embed=1" title="Avatar" allowfullscreen></iframe></div>
+    <div class="main">
+      <div class="session-workspace">
+        <div class="voice-host">
+          <div class="stage" id="stage">
+            <div class="presence">
+              <div class="avatar"><iframe id="frame" src="/avatar/index.html?embed=1" title="Avatar" allowfullscreen></iframe></div>
+              <div class="stage-controls">
+                <div class="dot" title="Orb/Avatar">◉</div>
+                <div class="dot" title="End">✕</div>
+                <div class="dot" title="Mute mic">🎙</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="composer"><div class="fake-input">Type a message…</div><span>⏎</span></div>
+      </div>
     </div>
-    <button type="button" class="close" id="closeBtn" title="Return to the small avatar" aria-label="Return to the small avatar">✕</button>
+  </div>
+  <button type="button" class="close" id="closeBtn" title="Return to the small avatar" aria-label="Return to the small avatar">✕</button>
+  <div class="hint" id="hint">
+    <b>Full-page overlay preview</b> — mirrors the production voice stage. The avatar sits in a
+    <b>sub-area</b> of the page (next to the sidebar/composer). Click its <b>⛶</b> button to enlarge:
+    the stage becomes a <b>page-level overlay</b> (fixed to the viewport), and the <b>X / Y sliders</b>
+    set the size as % of the <b>whole page</b> (100/100 = the entire window). Close with <b>✕</b> or <b>Esc</b>.
   </div>
 <script>
   const stage = document.getElementById("stage");
@@ -83,8 +123,7 @@ body{font-family:"M PLUS Rounded 1c","Nunito",ui-rounded,"Segoe UI",system-ui,sa
     setFull(true);               // sizing the panel implies the enlarged view
     post({ panelSize: size });   // mirror the applied size onto the avatar page's sliders
   }
-  // The avatar page's ⛶ always maximizes (near-fullscreen, 100/100); its ✕ / Esc
-  // collapse it; its X/Y sliders ask for a specific size while it's open.
+  // ⛶ always maximizes (near-fullscreen, 100/100); ✕ / Esc collapse; X/Y size while open.
   window.addEventListener("message", (e) => {
     const req = e.data && e.data.avatarRequest;
     if (!req || typeof req.action !== "string") return;
