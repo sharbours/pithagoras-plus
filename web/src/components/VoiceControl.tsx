@@ -14,6 +14,7 @@ import { LiveTranscription } from "../live-transcription";
 import { preparePcmSpeech, readPcmStream, playAudioBuffer } from "../pcm-stream";
 import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
+import { splitAvatarTags, avatarCue } from "../avatar-tags";
 
 export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, sessionId, items, running, onSend, onAbort, stageTarget, onModeChange, title, browserAvailable, browserActivity, terminalActivity, toolEvents }: {
   sessionId: string;
@@ -191,6 +192,11 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const synthesize = async (text: string, signal: AbortSignal, audio: AudioContext, kind:'reply'|'status'='reply') => {
     const trace=profiling.current?profiler.current!.current:undefined;
     const mark=(name:string,detail?:Record<string,number|string|boolean>,at?:number)=>{if(trace)profiler.current!.mark(kind+'_'+name,detail,trace,at);};
+    // Avatar tags are silent: TTS gets the sentence without them, the avatar gets them
+    // (with the speech cues) when this sentence starts playing.
+    const { spoken, cues } = splitAvatarTags(text);
+    if (!spoken) return Object.assign(async () => { avatarCue(cues); }, {});
+    text = spoken;
     mark('tts_request');
     // The previous cancelled request may still be releasing Breeze's GPU lock.
     let response: Response;
@@ -285,6 +291,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
           const outputMs=(audio.baseLatency+(audio.outputLatency||0))*1000;
           mark('playback_estimate',{outputLatencyMs:outputMs},performance.now()+Math.max(0,scheduledAt-audio.currentTime)*1000+outputMs);
           armMic(); meter();
+          avatarCue(cues, buffer ? buffer.duration * 1000 : 0);
         };
         if (speechStream) await speechStream.play(analyser, started);
         else await playAudioBuffer(buffer!, audio, analyser, playbackSignal, started);

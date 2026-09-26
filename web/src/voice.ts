@@ -1,4 +1,5 @@
 import type { Item } from "./transcript";
+import { stripAvatarTags, hidePartialAvatarTag } from "./avatar-tags";
 
 /** Only new completed replies, even when older history is paged into view. */
 export function newSpeech(items: Item[], afterSeq: number, seen: Set<string>): string[] {
@@ -113,5 +114,7 @@ export function displaySpeechText(text: string, done: boolean): string {
       if (['(laugh)', '(cough)', '(clears throat)', '(sigh)'].some(tag => tag.startsWith(tail))) visible = visible.slice(0, start);
     }
   }
+  // Avatar stage directions such as [happy] are silent and never shown.
+  visible = stripAvatarTags(done ? visible : hidePartialAvatarTag(visible));
   return visible.replace(/[ \t]+([,.!?])/g, '$1').trim();
 }

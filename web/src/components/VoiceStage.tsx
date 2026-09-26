@@ -4,7 +4,8 @@ import { useWorkPanels } from "../use-work-panels";
 import { VoiceToolActivity } from "./VoiceToolActivity";
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { buildTranscript } from "../transcript";
-import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinus, LuVolume2, LuVolumeX, LuTerminal, LuFileText } from "react-icons/lu";
+import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinus, LuVolume2, LuVolumeX, LuTerminal, LuFileText, LuUser, LuCircle } from "react-icons/lu";
+import { AvatarFrame } from "./AvatarFrame";
 import { VoiceTerminal } from "./VoiceTerminal";
 import { api, type PortalEvent } from "../api";
 import type { VoiceCue } from "../voice-cues";
@@ -99,6 +100,8 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
   const [shown, setShown] = useState(false), [terminalShown, setTerminalShown] = useState(false);
   useWorkPanels(shown, terminalShown, canvasOpen, panel => { if(panel === "browser") setShown(false); else if(panel === "terminal") setTerminalShown(false); else onCanvasMinimize(); });
   const [loaded, setLoaded] = useState(false);
+  const [face, setFace] = useState<"avatar" | "orb">(() => localStorage.getItem("voiceFace") === "orb" ? "orb" : "avatar");
+  const toggleFace = () => setFace(value => { const next = value === "avatar" ? "orb" : "avatar"; localStorage.setItem("voiceFace", next); return next; });
   const [terminalUsed, setTerminalUsed] = useState(false);
   const [browserError, setBrowserError] = useState('');
   const thoughtViewport = useRef<HTMLDivElement>(null);
@@ -165,7 +168,7 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
     </section>
     <VoiceToolActivity events={toolEvents} />
     <div className="voice-presence">
-      <div className="voice-avatar"><VoiceOrb mode={mode} levels={levels} /></div>
+      <div className="voice-avatar">{face === "avatar" ? <AvatarFrame phase={phase} speaking={speaking} muted={muted} levels={levels} /> : <VoiceOrb mode={mode} levels={levels} />}</div>
       <div className="voice-dock-center">
         {workPhase && ['processing the prompt','compacting the conversation'].includes(workPhase.label) ? <ActivityProgress phase={workPhase} compact /> : <>
         <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? phase : thought && (shown || terminalShown) ? 'Thinking' : status}</div>
@@ -176,6 +179,7 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
 
       <div className="voice-stage-controls">
         <div className="voice-status voice-status-stack" role="status"><span />{phase === 'Compacting context' ? phase : thought && (shown || terminalShown) ? 'Thinking' : status}</div>
+        <button type="button" className="voice-stage-action" title={face === "avatar" ? "Show the orb" : "Show the avatar"} aria-label={face === "avatar" ? "Show the orb" : "Show the avatar"} onClick={toggleFace}>{face === "avatar" ? <LuCircle /> : <LuUser />}</button>
         <button ref={end} type="button" className="voice-stage-action voice-end" title="End voice mode" aria-label="End voice mode" onClick={onEnd}><LuX /></button>
         <button type="button" className={`voice-stage-action ${muted ? "is-muted" : ""}`} title={muted ? 'Unmute microphone' : 'Mute microphone'} aria-label={muted ? "Unmute microphone" : "Mute microphone"} aria-pressed={muted} disabled={starting} onClick={onMute}><LuMicOff className={muted ? '' : 'hidden'} /><LuMic className={muted ? 'hidden' : ''} /></button>
       </div>

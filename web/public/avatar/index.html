@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avatar Lab</title>
+<style>
+:root{
+  --font: "M PLUS Rounded 1c", "Nunito", ui-rounded, "Segoe UI", system-ui, sans-serif;
+  --stage-top:#cfe1ff; --stage-bot:#fbd9ec; --dots:rgba(70,60,140,.10);
+  --panel:#f6f4fd; --ink:#28224a; --muted:#6a6390; --line:#ddd7f1;
+  --chip:#ffffff; --chip-hover:#efeafe;
+  --accent:#d6457a; --accent-ink:#ffffff; --accent-soft:#fde3ee;
+  --live:#2b9c82; --warn:#c2572b;
+  --bubble:rgba(255,255,255,.93);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --stage-top:#27305c; --stage-bot:#4a2950; --dots:rgba(255,255,255,.07);
+    --panel:#1c1932; --ink:#ece9ff; --muted:#a39dcb; --line:#353058;
+    --chip:#262241; --chip-hover:#302a52; --accent:#ff6b9d; --accent-ink:#1c1932; --accent-soft:#3d2442;
+    --live:#5fd3b5; --warn:#ff9a6b; --bubble:rgba(30,26,52,.92);
+  }
+}
+*{box-sizing:border-box}
+/* Embedded (?embed=1): only the character, on a transparent background, for hosting inside another app */
+html.embed, html.embed body{background:transparent}
+html.embed .bar, html.embed .panel, html.embed .stage-top, html.embed .credit, html.embed .subtitle{display:none !important}
+html.embed .app{grid-template-rows:1fr} html.embed .layout{grid-template-columns:1fr}
+html.embed .stage{background:none} html.embed .stage::after{display:none}
+[hidden]{display:none !important}
+html,body{height:100%;margin:0}
+body{font-family:var(--font);color:var(--ink);background:var(--panel);font-size:15px;line-height:1.45}
+button,select,input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+
+.app{display:grid;grid-template-rows:auto 1fr;height:100%}
+.bar{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.brand{font-weight:800;font-size:20px;letter-spacing:-.01em;margin-right:auto;display:flex;align-items:center;gap:10px}
+.brand-dot{width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+.bar label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:14px}
+select{background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:7px 10px;color:var(--ink)}
+.btn{background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:7px 12px;cursor:pointer;font-weight:500}
+.btn:hover{background:var(--chip-hover)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:700}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 380px;min-height:0}
+.stage{position:relative;overflow:hidden;min-height:0;
+  background:
+    radial-gradient(circle, var(--dots) 1.5px, transparent 1.6px) 0 0/22px 22px,
+    linear-gradient(180deg,var(--stage-top),var(--stage-bot));}
+.stage::after{content:"";position:absolute;left:50%;bottom:-38%;width:70%;height:55%;transform:translateX(-50%);
+  background:radial-gradient(ellipse at center, rgba(255,255,255,.45), transparent 65%);pointer-events:none}
+#svgAvatar{position:absolute;inset:0;width:100%;height:100%;z-index:1}
+#vrmCanvas{position:absolute;inset:0;width:100%;height:100%;z-index:1;display:block}
+.stage-top{position:absolute;top:14px;left:14px;right:14px;display:flex;gap:8px;align-items:center;z-index:5;flex-wrap:wrap}
+.badge{background:var(--bubble);border-radius:999px;padding:4px 12px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:7px}
+.badge .pip{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.badge.live .pip{background:var(--live)}
+.badge.talk .pip{background:var(--accent);animation:pulse .8s infinite alternate}
+@keyframes pulse{to{transform:scale(1.6);opacity:.5}}
+.stage-top select{margin-left:auto;background:var(--bubble);border:none;font-size:13px}
+.subtitle{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);max-width:min(80%,640px);z-index:5;
+  background:var(--bubble);border-radius:18px;padding:10px 18px;font-size:17px;font-weight:500;text-align:center;
+  box-shadow:0 6px 24px rgba(40,30,90,.12)}
+.credit{position:absolute;left:14px;bottom:10px;font-size:11.5px;color:var(--muted);z-index:4;max-width:60%}
+.loading,.drop-hint{position:absolute;inset:0;display:grid;place-items:center;z-index:8;font-weight:700;font-size:18px;
+  background:color-mix(in srgb, var(--panel) 55%, transparent);backdrop-filter:blur(3px)}
+.drop-hint{border:3px dashed var(--accent);margin:12px;border-radius:20px}
+.emotes{position:absolute;inset:0;pointer-events:none;z-index:6}
+.emote{position:absolute;font-weight:800;font-size:40px;line-height:1;transform:translate(-50%,-50%);
+  animation:emote 1.7s cubic-bezier(.2,.9,.3,1) forwards;text-shadow:0 2px 0 rgba(255,255,255,.7)}
+.emote svg{width:44px;height:44px;display:block}
+@keyframes emote{
+  0%{opacity:0;transform:translate(-50%,-30%) scale(.4)}
+  18%{opacity:1;transform:translate(-50%,-60%) scale(1.15)}
+  30%{transform:translate(-50%,-65%) scale(1)}
+  100%{opacity:0;transform:translate(-40%,-160%) scale(1)}
+}
+.e-happy{color:#e2557f}.e-surprised{color:#e9a21a}.e-thinking{color:#6b5bd2}.e-sleepy{color:#5c7bd6}.e-shy{color:#ff6f9a}
+
+.panel{border-left:1px solid var(--line);overflow-y:auto;padding:6px 18px 30px}
+.sec{padding:16px 0;border-bottom:1px solid var(--line)}
+.sec:last-child{border-bottom:none}
+.sec h2{font-size:15px;font-weight:800;margin:0 0 10px}
+.hint{color:var(--muted);font-size:13px;margin:6px 0 0}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--chip);border:1px solid var(--line);border-radius:12px;padding:3px}
+.seg button{border:none;background:none;padding:7px;border-radius:9px;cursor:pointer;font-weight:700;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.chips{display:flex;flex-wrap:wrap;gap:7px}
+.chip{background:var(--chip);border:1px solid var(--line);border-radius:999px;padding:5px 12px;cursor:pointer;font-size:14px}
+.chip:hover{background:var(--chip-hover)}
+.chip.on{border-color:var(--accent);background:var(--accent-soft)}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.row label{font-size:13px;color:var(--muted);display:flex;gap:6px;align-items:center}
+input[type=range]{accent-color:var(--accent);width:120px}
+input[type=text],textarea{width:100%;background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+textarea{min-height:108px;resize:vertical;font-size:14px}
+.status{font-size:13px;font-weight:700;color:var(--muted)}
+.status.ok{color:var(--live)}.status.bad{color:var(--warn)}
+.log{font-size:12px;color:var(--muted);max-height:150px;overflow:auto;background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:8px 10px;white-space:pre-wrap;word-break:break-word}
+code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border-radius:5px;padding:0 4px}
+
+@media (max-width: 860px){
+  .layout{grid-template-columns:1fr;grid-template-rows:62vh auto}
+  .panel{border-left:none;border-top:1px solid var(--line);overflow:visible}
+  .app{height:auto}
+}
+</style>
+<script src="avatar-boot.js"></script>
+<!-- Optional companion file listing extra characters. Missing is fine. -->
+<script src="characters.js"></script>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brand"><span class="brand-dot" aria-hidden="true"></span>Avatar Lab</div>
+    <label>Character <select id="charSelect"></select></label>
+    <button class="btn" id="loadBtn">Load .vrm file</button>
+    <button class="btn" id="bgBtn">Background image</button>
+    <button class="btn" id="bgClear" hidden>Clear background</button>
+    <input type="file" id="bgInput" accept="image/*" hidden>
+    <input type="file" id="fileInput" accept=".vrm,.glb,.png,.jpg,.jpeg,.webp,.ktx2" multiple hidden>
+  </header>
+
+  <main class="layout">
+    <section class="stage" id="stage" aria-label="Avatar stage">
+      <canvas id="bgImage" style="position:absolute;inset:0;width:100%;height:100%;z-index:0;display:block" hidden></canvas>
+      <svg id="svgAvatar" viewBox="0 0 400 500" preserveAspectRatio="xMidYMax meet" aria-hidden="true"></svg>
+      <canvas id="vrmCanvas" hidden></canvas>
+      <div class="emotes" id="emotes"></div>
+      <div class="stage-top">
+        <span class="badge" id="modeBadge"><span class="pip"></span><span>Idle</span></span>
+        <span class="badge" id="talkBadge" hidden><span class="pip"></span>Speaking</span>
+        <select id="framing" aria-label="Camera framing" hidden>
+          <option value="face">Face</option>
+          <option value="bust" selected>Upper body</option>
+          <option value="full">Full body</option>
+        </select>
+      </div>
+      <div class="subtitle" id="subtitle" hidden></div>
+      <div class="credit" id="credit"></div>
+      <div class="loading" id="loading" hidden>Loading character…</div>
+      <div class="drop-hint" id="dropHint" hidden>Drop a .vrm file (and any texture files) to load it</div>
+    </section>
+
+    <aside class="panel">
+      <div class="sec">
+        <h2>Mode</h2>
+        <div class="seg" role="group" aria-label="Mode">
+          <button id="modeIdle" aria-pressed="true">Idle</button>
+          <button id="modeDriven" aria-pressed="false">LLM-driven</button>
+        </div>
+        <p class="hint" id="modeHint">Idle: the character glances around, blinks and emotes on its own.</p>
+      </div>
+
+      <div class="sec">
+        <h2>Emotion</h2>
+        <div class="chips" id="emotionChips"></div>
+        <div id="customWrap" hidden>
+          <p class="hint" style="margin:10px 0 6px">This character's own expressions (tag: <code>[expr:Name]</code>)</p>
+          <div class="chips" id="customChips"></div>
+        </div>
+        <div class="row"><label>Intensity <input type="range" id="intensity" min="0.1" max="1" step="0.05" value="0.85"></label></div>
+      </div>
+
+      <div class="sec">
+        <h2>Gesture</h2>
+        <div class="chips" id="gestureChips"></div>
+      </div>
+
+      <div class="sec">
+        <h2>Martial arts poses</h2>
+        <div class="chips" id="poseChips"></div>
+        <h2 style="margin-top:14px">Ballet poses</h2>
+        <div class="chips" id="balletChips"></div>
+        <p class="hint">3D characters only. Tag: <code>[pose:horse]</code>, or <code>[pose:horse:5]</code> to hold for 5 seconds. Full body framing shows the legs.
+          Poses from <em>Martial Arts Pose Pack</em> (CC BY) and <em>Ballet Poses Exhibit</em> by Luminestrial, adapted from Virt-A-Mate.</p>
+      </div>
+
+      <div class="sec">
+        <h2>Simulated LLM reply</h2>
+        <textarea id="sayText" spellcheck="false"></textarea>
+        <p class="hint">Tags like <code>[happy]</code>, <code>[sad:0.5]</code> or <code>[wave]</code> fire at that point in the speech. JSON commands work too.</p>
+        <div class="row">
+          <button class="btn primary" id="runBtn">Speak it</button>
+          <button class="btn" id="stopBtn">Stop</button>
+          <select id="sampleSelect" aria-label="Load a sample">
+            <option value="">Load a sample…</option>
+            <option value="tags">Tagged text</option>
+            <option value="json">JSON commands</option>
+            <option value="long">Longer reply</option>
+            <option value="gestures">Gesture tour</option>
+          </select>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="ttsOn" checked> Browser voice</label>
+          <select id="voiceSelect" aria-label="Voice" style="max-width:190px"></select>
+        </div>
+        <div class="row">
+          <label>Rate <input type="range" id="rate" min="0.6" max="1.6" step="0.05" value="1"></label>
+          <label>Pitch <input type="range" id="pitch" min="0.5" max="2" step="0.05" value="1.15"></label>
+        </div>
+      </div>
+
+      <div class="sec">
+        <h2>Lip sync from microphone</h2>
+        <p class="hint" style="margin-top:0">Tests the audio-driven mouth path that real TTS audio will use later.</p>
+        <div class="row"><button class="btn" id="micBtn">Start microphone</button></div>
+      </div>
+
+      <div class="sec">
+        <h2>Remote control</h2>
+        <input type="text" id="wsUrl" value="ws://localhost:8765" aria-label="WebSocket address">
+        <div class="row">
+          <button class="btn" id="wsBtn">Connect</button>
+          <span class="status" id="wsStatus">Not connected</span>
+        </div>
+        <p class="hint">Also listens for <code>window.avatar.command({...})</code>, <code>postMessage({avatar:{...}})</code> and BroadcastChannel <code>avatar-lab</code>.</p>
+      </div>
+
+      <div class="sec" id="modelCheck" hidden>
+        <h2>Model check</h2>
+        <p id="checkVerdict" style="margin:0;white-space:pre-line"></p>
+        <div class="log" id="checkDetails" style="margin-top:10px"></div>
+        <div class="row"><button class="btn" id="copyCheck">Copy report</button></div>
+      </div>
+
+      <div class="sec">
+        <h2>Event log</h2>
+        <div class="log" id="log" aria-live="polite"></div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<!-- three.js r169 (MIT) + @pixiv/three-vrm 3.x (MIT) + Basis Universal transcoder (Apache-2.0) + meshoptimizer decoder (MIT), bundled inline so the file works offline -->
+<script src="avatar-libs.js"></script>
+
+<script src="avatar-app.js"></script>
+</body>
+</html>
