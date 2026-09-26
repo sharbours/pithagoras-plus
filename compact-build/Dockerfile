@@ -7,12 +7,13 @@ COPY web/package.json web/
 RUN npm install
 COPY server server
 COPY web web
-# compact-only promotion: revert the parked permission-feature files,
-# then drop the orphaned permission sources before compiling.
-COPY compact-build/override-server-index.ts server/src/index.ts
-COPY compact-build/override-web-api.ts web/src/api.ts
-COPY compact-build/override-web-Chat.tsx web/src/components/Chat.tsx
-RUN rm -f server/src/api/approvals.ts web/src/components/PermissionBar.tsx
+# The merged tree IS the product: compact mode is a RUNTIME feature
+# (viewport-driven `compact-mode` store + `html.compact`), so a single clean
+# build serves both small and full displays. The old "compact-only promotion"
+# that pinned server/index.ts + web/api.ts back to a pre-approvals snapshot and
+# deleted approvals.ts/PermissionBar.tsx is obsolete — that build silently
+# dropped the approvals UI the Hermes bridge relies on. Build the tree as-is
+# so compact mode, approvals, and the Hermes bridge all ship together.
 RUN npm run build
 
 FROM node:22-slim
