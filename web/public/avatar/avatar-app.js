@@ -42,6 +42,32 @@ function setPos(frac) {
   applyPos();
   const sel = $("#pickPos"); if (sel) sel.value = Math.round(posFrac * 100);
 }
+// ---------------------------------------------------------------- near-fullscreen view
+// The ⛶ button (next to the gear) and the ✕ (upper-right) let the user pop the avatar
+// out to a near-fullscreen view and back, keeping whatever character / framing /
+// position / background are currently set — no reload, so the live session keeps running.
+//   • When the page is a real embed (inside the voice stage's iframe), the ⛶ asks its
+//     host to grow the avatar's slot; the host replies {avatar:{full:true|false}}, which
+//     shows / hides the ✕. The ✕ asks the host to shrink it back.
+//   • When opened standalone (no host), ⛶ / ✕ use the browser's native fullscreen.
+// Either way the stage's ResizeObserver re-fits the character to the new size.
+const IN_IFRAME = window.parent !== window;
+function setFull(on) {
+  const el = $("#fullClose");
+  // The page's own ✕ only makes sense when NOT inside a host iframe (the host supplies its
+  // own upper-right ✕). Mark that so CSS can hide the duplicate; standalone keeps its own.
+  document.documentElement.classList.toggle("avatar-embedded", IN_IFRAME);
+  if (el) el.hidden = !on;
+  document.documentElement.classList.toggle("avatar-full", !!on);
+}
+function requestExpand() {
+  if (IN_IFRAME) window.parent.postMessage({ avatarRequest: { action: "expand" } }, "*");
+  else (document.documentElement.requestFullscreen ? document.documentElement.requestFullscreen().catch(() => {}) : null);
+}
+function requestCollapse() {
+  if (IN_IFRAME) window.parent.postMessage({ avatarRequest: { action: "collapse" } }, "*");
+  else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+}
 
 /* The three.js + VRM stack (avatar-libs.js, ~1.7 MB) is loaded lazily: only when
    a 3D character is first requested. The built-in 2D character never needs it,
@@ -505,6 +531,7 @@ function command(c) {
   if (typeof c.mouth === "number") { S.extMouth = clamp(c.mouth, 0, 1); S.extMouthT = now(); if (Object.keys(c).length === 1) return; }
   if (c.state && Object.keys(c).length === 1) { setConversationState(c.state); return; }
   log(`← command ${JSON.stringify(c)}`);
+  if (c.full !== undefined) { setFull(!!c.full); return; }   // host tells us enlarged vs. small (shows/hides the ✕)
   if (c.mode) setMode(c.mode);
   if (c.character) selectCharacter(c.character);
   if (c.stop) stopSpeech();
@@ -1458,6 +1485,14 @@ fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged =
   };
   // keep the character list in sync when one is added (e.g. a .vrm is uploaded)
   new MutationObserver(syncChar).observe($("#charSelect"), { subtree: true, childList: true });
+  // Enlarge / restore to small: ⛶ asks the host to grow the slot (or goes native
+  // fullscreen when standalone); the ✕ (upper-right) asks it to shrink back. The
+  // ✕'s visibility is driven by the host's {full:true|false} reply (see command()).
+  const pe = $("#pickExpand");
+  if (pe) pe.onclick = requestExpand;
+  const fc = $("#fullClose");
+  if (fc) fc.onclick = requestCollapse;
+  document.addEventListener("fullscreenchange", () => setFull(!!document.fullscreenElement));
 })();
 
 /* ---------------------------------------------------------------- 3D fallback

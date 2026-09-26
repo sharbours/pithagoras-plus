@@ -148,6 +148,43 @@
 .voice-avatar { width: 100%; line-height: 0; transition: width .7s cubic-bezier(.22,1,.36,1); }
 .voice-orb { width: 100%; aspect-ratio: 1; height: auto; filter: saturate(1.1); }
 .voice-avatar-frame { display: block; width: 100%; aspect-ratio: 1; height: auto; border: 0; background: transparent; color-scheme: normal; }
+/* Enlarged (near-fullscreen) avatar view: the voice stage promotes the avatar's
+   square slot to a centered, near-viewport panel and tucks the surrounding chrome
+   (header + status/thought dock) out of the way so the character owns the screen.
+   The bottom mic/end/mute controls stay usable; the avatar page shows its own ✕ in
+   the upper-right (with a stage-level ✕ here as a fallback) and Escape also closes. */
+.voice-stage.is-avatar-expanded { overflow: hidden; }
+.voice-stage.is-avatar-expanded .voice-presence {
+  left: 0; top: 0; transform: none;
+  width: calc(100% - 28px);
+  height: calc(100% - 128px);
+  max-width: calc(100% - 28px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 14px;
+  background: color-mix(in srgb, rgb(var(--surface)) 62%, transparent);
+  border: 1px solid rgb(var(--line) / .5);
+  border-radius: 24px;
+  box-shadow: 0 30px 90px #0006;
+  backdrop-filter: blur(10px);
+}
+.voice-stage.is-avatar-expanded .voice-avatar { width: 100%; height: 100%; }
+.voice-stage.is-avatar-expanded .voice-avatar-frame { aspect-ratio: auto; height: 100%; }
+.voice-stage.is-avatar-expanded .voice-stage-header,
+.voice-stage.is-avatar-expanded .voice-dock-center,
+.voice-stage.is-avatar-expanded .voice-live-transcript,
+.voice-stage.is-avatar-expanded .voice-tool-activity { opacity: 0; pointer-events: none; }
+.voice-stage.is-avatar-expanded .voice-stage-controls { margin-top: 16px; }
+.voice-avatar-close {
+  position: absolute; top: 14px; right: 14px; z-index: 7;
+  width: 40px; height: 40px; border-radius: 50%;
+  border: 1px solid rgb(var(--line) / .6);
+  background: rgb(var(--surface) / .85); color: rgb(var(--fg));
+  font-size: 18px; line-height: 1; cursor: pointer;
+  display: grid; place-items: center;
+  box-shadow: 0 4px 18px #0005;
+  transition: background .2s, transform .2s;
+}
+.voice-avatar-close:hover { background: rgb(var(--raised)); transform: translateY(-2px); }
 .voice-status { display: flex; align-items: center; justify-content: center; gap: 7px; color: rgb(var(--fg-subtle)); font-size: 12px; white-space: nowrap; margin-top: -20px; transition: margin .6s, font-size .6s; }
 .voice-status > span { width: 4px; height: 4px; border-radius: 50%; background: rgb(var(--voice-hue)); box-shadow: 0 0 12px rgb(var(--voice-hue) / .45); }
 .voice-stage-controls { display: flex; gap: 14px; margin-top: 28px; transition: margin .6s, gap .6s; }

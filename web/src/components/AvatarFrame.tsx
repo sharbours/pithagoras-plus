@@ -10,8 +10,8 @@ import type { VoiceLevels } from "./VoiceStage";
  *  - cues: each sentence's avatar tags, sent by the speech pipeline when its audio starts
  * Pick the character, framing and background by opening /avatar/ directly; this view reuses them.
  */
-export function AvatarFrame({ phase, speaking, muted, levels }: {
-  phase: VoicePhase; speaking: boolean; muted: boolean; levels: MutableRefObject<VoiceLevels>;
+export function AvatarFrame({ phase, speaking, muted, levels, full }: {
+  phase: VoicePhase; speaking: boolean; muted: boolean; levels: MutableRefObject<VoiceLevels>; full?: boolean;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const post = (message: object) => frame.current?.contentWindow?.postMessage({ avatar: message }, location.origin);
@@ -21,7 +21,12 @@ export function AvatarFrame({ phase, speaking, muted, levels }: {
     : phase === "Hearing you" || phase === "Transcribing" ? "listening"
     : "idle";
   const latestState = useRef(state); latestState.current = state;
+  const latestFull = useRef(!!full); latestFull.current = !!full;
   useEffect(() => { post({ state }); }, [state]);
+  // Enlarged (near-fullscreen) mode: the voice stage grows the avatar's slot and the
+  // avatar page shows its ✕ button in response. Re-sent on every change so a frame
+  // that reloads mid-session lands in the right view.
+  useEffect(() => { post({ full: !!full }); }, [full]);
 
   useEffect(() => {
     if (!speaking) { post({ mouth: 0 }); return; }
@@ -41,5 +46,5 @@ export function AvatarFrame({ phase, speaking, muted, levels }: {
   }, []);
 
   return <iframe ref={frame} className="voice-avatar-frame" src="/avatar/index.html?embed=1" title="Avatar"
-    onLoad={() => post({ state: latestState.current })} />;
+    onLoad={() => { post({ state: latestState.current }); post({ full: latestFull.current }); }} />;
 }

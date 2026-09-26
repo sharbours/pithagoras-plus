@@ -104,6 +104,28 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
   const toggleFace = () => setFace(value => { const next = value === "avatar" ? "orb" : "avatar"; localStorage.setItem("voiceFace", next); return next; });
   const [terminalUsed, setTerminalUsed] = useState(false);
   const [browserError, setBrowserError] = useState('');
+  // Enlarged (near-fullscreen) avatar view. The avatar page's ⛶ button posts
+  // {avatarRequest:{action:"expand"}} to this window; its ✕ (and our fallback ✕, and
+  // Escape) post "collapse". We grow the avatar's slot and tell the frame it's full so
+  // its own ✕ shows.
+  const [avatarFull, setAvatarFull] = useState(false);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const req = event.data && event.data.avatarRequest;
+      if (!req || typeof req.action !== "string") return;
+      // Only honour requests from our own avatar frame (same-origin portal origin).
+      if (event.origin !== location.origin && event.origin !== "null") return;
+      setAvatarFull(req.action === "expand");
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+  useEffect(() => {
+    if (!avatarFull) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setAvatarFull(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [avatarFull]);
   const thoughtViewport = useRef<HTMLDivElement>(null);
   const thought = useMemo(() => {
     const latest = buildTranscript(toolEvents).at(-1);
@@ -144,7 +166,7 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
   const status = starting ? "Connecting" : input ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : "Listening";
-  return <section className={`voice-stage ${shown ? 'is-browsing' : ''} ${terminalShown ? 'is-terminal' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(canvasOpen)} data-mode={mode}>
+  return <section className={`voice-stage ${shown ? 'is-browsing' : ''} ${terminalShown ? 'is-terminal' : ''} ${avatarFull ? 'is-avatar-expanded' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(canvasOpen)} data-mode={mode}>
     <header className="voice-stage-header">
       <span className="voice-stage-session">{title}</span>
       <div className="voice-utilities">
@@ -168,7 +190,8 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
     </section>
     <VoiceToolActivity events={toolEvents} />
     <div className="voice-presence">
-      <div className="voice-avatar">{face === "avatar" ? <AvatarFrame phase={phase} speaking={speaking} muted={muted} levels={levels} /> : <VoiceOrb mode={mode} levels={levels} />}</div>
+      {avatarFull && <button type="button" className="voice-avatar-close" onClick={() => setAvatarFull(false)} title="Return to the small avatar" aria-label="Return to the small avatar">✕</button>}
+      <div className="voice-avatar">{face === "avatar" ? <AvatarFrame phase={phase} speaking={speaking} muted={muted} levels={levels} full={avatarFull} /> : <VoiceOrb mode={mode} levels={levels} />}</div>
       <div className="voice-dock-center">
         {workPhase && ['processing the prompt','compacting the conversation'].includes(workPhase.label) ? <ActivityProgress phase={workPhase} compact /> : <>
         <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? phase : thought && (shown || terminalShown) ? 'Thinking' : status}</div>
