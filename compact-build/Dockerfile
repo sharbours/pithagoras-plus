@@ -4,6 +4,13 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY server/package.json server/
 COPY web/package.json web/
+# better-sqlite3 ships a binding.gyp. Normally npm fetches a prebuilt binary,
+# but if that fetch fails (newer Node ABI, or GitHub-releases unreachable) it
+# falls back to node-gyp, which needs a toolchain. This stage is thrown away
+# (only dist/ is copied out), so a compiler here never bloats the runtime image.
+# Mirrors the root Dockerfile's build stage.
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 RUN npm install
 COPY server server
 COPY web web
