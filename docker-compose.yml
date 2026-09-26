@@ -17,6 +17,11 @@ services:
       - ${WORKSPACES_DIR:-/root/repos}:/workspaces
       # Required for managed Browser/Voice add-ons and EXECUTOR=container.
       - /var/run/docker.sock:/var/run/docker.sock
+      # The avatar's .vrm models live on the host, not in the image: they are
+      # large binaries that change often, so adding a character is a file drop
+      # into this directory (no rebuild). The mount overlays the image's copy
+      # of the same path; the 2.4 MB background gallery stays baked in.
+      - ${AVATAR_MODELS_HOST_DIR:-/opt/pithagoras/avatars/characters}:/app/web/dist/avatar/characters:ro
     environment:
       # Must match container_name: managed voice shares this network namespace,
       # and the container executor translates its mounts to host paths through it.
