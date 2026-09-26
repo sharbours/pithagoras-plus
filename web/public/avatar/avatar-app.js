@@ -16,6 +16,21 @@ const store = {
   get(k) { try { return localStorage.getItem("avatarLab." + k); } catch { return null; } },
   set(k, v) { try { v == null ? localStorage.removeItem("avatarLab." + k) : localStorage.setItem("avatarLab." + k, v); } catch {} },
 };
+
+/* The three.js + VRM stack (avatar-libs.js, ~1.7 MB) is loaded lazily: only when
+   a 3D character is first requested. The built-in 2D character never needs it,
+   so opening the page on a phone doesn't pay for a 3D engine it may not use. */
+let libsP = null;
+function ensureLibs() {
+  if (window.AvatarLibs) return Promise.resolve(window.AvatarLibs);
+  if (!libsP) libsP = new Promise((res, rej) => {
+    const s = document.createElement("script"); s.src = "avatar-libs.js";
+    s.onload = () => res(window.AvatarLibs);
+    s.onerror = () => rej(new Error("Couldn't load the 3D libraries (avatar-libs.js)."));
+    document.head.appendChild(s);
+  });
+  return libsP;
+}
 function idb(mode, fn) {
   return new Promise((res, rej) => {
     let open; try { open = indexedDB.open("avatar-lab", 1); } catch (e) { return rej(e); }
@@ -776,7 +791,10 @@ const SvgAvatar = (() => {
 
 /* ---------------------------------------------------------------- VRM renderer (three.js + three-vrm) */
 const VrmAvatar = (() => {
-  const L = window.AvatarLibs; let THREE;
+  /* The 3D stack is loaded lazily by ensureLibs() — the first .vrm triggers it.
+     `L` is resolved on demand so the module (and its closure) stay light until
+     a 3D character is actually requested. */
+  let L = null, THREE;
   let renderer, scene, camera, lookTarget, vrm = null, isV0 = false, hipsY = 0, headY = 1.4, hipsRest = null;
   let baseQ, flipQ, spinQ, tmpV, tmpV2, AXIS_X, AXIS_Y;
   /* Spin physics. VRoid hair is tuned stiff and damped, and some models anchor their springs to a
@@ -784,6 +802,7 @@ const VrmAvatar = (() => {
      centrifugal push (outward from the rotation axis) plus a push along the direction of rotation to every spring joint, loosen
      stiffness and damping, then restore the model's own settings so the hair falls and settles. */
   let springs = [], prevSpin = 0, prevFlip = 0, flare = 0, flareF = 0, flareOn = false;
+  const fpsSamples = [];   // ms per render, rolling window — used to detect a struggling GPU
   const _p = { v: null, r: null, tg: null, f: null };
   function captureSprings(v) {
     springs = [];
@@ -850,6 +869,7 @@ const VrmAvatar = (() => {
 
   function init() {
     if (renderer) return;
+    if (!L) L = window.AvatarLibs;
     if (!L) throw new Error("The 3D libraries failed to load, so .vrm characters can't be shown.");
     THREE = L.THREE;
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -997,7 +1017,7 @@ const VrmAvatar = (() => {
   }
 
   function apply(dt) {
-    if (!vrm) return;
+    if (!vrm || canvas.hidden) return;
     const w = S.w, o = S.pose, em = vrm.expressionManager;
     const set = (n, val) => { const real = exprMap[n]; if (real) em.setValue(real, clamp(val, 0, 1)); };
     set("happy", w.happy + w.shy * .45 + w.smirk * .3);
@@ -1047,7 +1067,10 @@ const VrmAvatar = (() => {
     if (o.poseW > 0) applyPose(o);
     spinPhysics(o, dt);
     vrm.update(dt);
+    const t0 = performance.now();
     renderer.render(scene, camera);
+    fpsSamples.push(performance.now() - t0);
+    if (fpsSamples.length > 90) fpsSamples.shift();
   }
   function headScreen() {
     const r = $("#stage").getBoundingClientRect();
@@ -1058,14 +1081,20 @@ const VrmAvatar = (() => {
   }
   function meta() { return vrm && vrm.meta; }
   return { load, apply, headScreen, frame, meta, lastLoad: () => lastLoad, get vrm() { return vrm; },
+    ready: () => !!renderer,   // true once the WebGL renderer exists (3D usable)
+    fps: () => { if (fpsSamples.length < 30) return null; const s = fpsSamples.reduce((a, b) => a + b, 0); return s / fpsSamples.length; },  // avg ms per frame
     findExpression: n => { if (!vrm) return null; const l = String(n).toLowerCase(); return (vrm.expressionManager.expressions.find(e => e.expressionName.toLowerCase() === l) || {}).expressionName || null; },
-    customNames: () => customNames.slice(), show(v) { canvas.hidden = !v; if (v) resize(); } };
+    customNames: () => customNames.slice(), show(v) { canvas.hidden = !v; canvas.style.opacity = "1"; if (v) resize(); } };
 })();
 
 /* ---------------------------------------------------------------- characters */
 const builtIn = { id: "mochi", name: "Mochi (built-in)", kind: "svg", credit: "Mochi, the built-in character" };
 const chars = [builtIn, ...window.AVATAR_CHARACTERS.map(c => ({ kind: "vrm", ...c }))];
 let currentChar = null, active = SvgAvatar;
+// Remembered per device: when a 3D model failed to load or ran too slow, so a
+// reload doesn't immediately hit the same dead end. Picking a 3D character
+// again clears it (retries).
+let threeBroken = store.get("threeBroken") === "1";
 
 function loadScript(src) {
   return new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res;
@@ -1100,12 +1129,37 @@ async function selectCharacter(id) {
   try {
     if (c.kind === "svg") { VrmAvatar.show(false); SvgAvatar.show(true); active = SvgAvatar; $("#framing").hidden = true; showModelCheck(c, null); }
     else {
+      // A 3D pick after a remembered failure/slowdown retries it on purpose.
+      if (threeBroken) { threeBroken = false; store.set("threeBroken", null); log("Retrying 3D (it failed or was slow before on this device)."); }
       const buf = await getBuffer(c);
       const res = {};
       for (const f of c.extras || []) res[f.name.toLowerCase()] = (f._url ||= URL.createObjectURL(f));
-      try { await VrmAvatar.load(buf, res); } catch (e) { showModelCheck(c, buf); throw e; }
+      // Keep the 2D character on screen while the 3D model loads, then crossfade
+      // it in — no blank square. The 3D libs are pulled in here, on first use.
+      SvgAvatar.show(true);
+      try { await ensureLibs(); await VrmAvatar.load(buf, res); }
+      catch (e) {
+        showModelCheck(c, buf);
+        // WebGL itself unavailable (some browsers / headless GPUs): 3D can't
+        // work at all here, so remember it and fall back to the 2D character.
+        if (!VrmAvatar.ready()) {
+          threeBroken = true; store.set("threeBroken", "1");
+          currentChar = prev;
+          log(`3D can't be used on this device (WebGL unavailable: ${e.message}). Showing the built-in 2D character instead.`);
+          await selectCharacter("mochi");
+          return;
+        }
+        throw e;
+      }
       showModelCheck(c, buf);
-      SvgAvatar.show(false); VrmAvatar.show(true); active = VrmAvatar; $("#framing").hidden = false;
+      // Swap the 3D canvas in invisibly, then fade to opaque over ~1/3 s.
+      const cv = $("#vrmCanvas");
+      SvgAvatar.show(false);
+      VrmAvatar.show(true);                 // makes the canvas visible (opacity 1)
+      active = VrmAvatar; $("#framing").hidden = false;
+      cv.style.transition = "opacity .35s"; cv.style.opacity = "0";   // start invisible
+      requestAnimationFrame(() => { cv.style.opacity = "1"; });       // fade in
+      armFpsCheck();   // watch the frame rate once it's actually running
     }
     currentChar = c;
     store.set("character", c.id);
@@ -1273,9 +1327,13 @@ $("#framing").onchange = e => { VrmAvatar.frame(e.target.value); store.set("fram
 $("#charSelect").onchange = e => selectCharacter(e.target.value);
 $("#loadBtn").onclick = () => $("#fileInput").click();
 $("#bgBtn").onclick = () => $("#bgInput").click();
-// The background is decoded and painted onto a canvas: no blob: or data: link is involved, so viewers
-// with strict security policies (e.g. file previews) can't block it.
+// The background is decoded and painted onto a canvas: no blob: or data: link is
+// involved, so viewers with strict security policies (e.g. file previews) can't block it.
+// It's either a shipped gallery image (remembered by id, re-fetched each load) or an
+// image the user uploaded (the file itself, kept in IndexedDB). Either way it's
+// remembered, so the embedded voice stage shows the same backdrop.
 let bgBitmap = null;
+const shippedBgs = (window.AVATAR_BACKGROUNDS || []).map(b => ({ ...b, kind: "shipped" }));
 function drawBg() {
   const c = $("#bgImage"); if (!bgBitmap) return;
   const r = $("#stage").getBoundingClientRect(), dpr = Math.min(devicePixelRatio || 1, 2);
@@ -1291,15 +1349,24 @@ async function decodeImage(f) {
   const url = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); });
   return await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url; });
 }
+async function applyBackground(b) {
+  if (!b) { bgBitmap = null; $("#bgImage").hidden = true; $("#bgClear").hidden = true; store.set("background", null); idbSet("background", null); return; }
+  if (b.kind === "shipped") {
+    const r = await fetch(b.url); if (!r.ok) throw new Error(`Couldn't load ${b.url} (${r.status}).`);
+    bgBitmap = await decodeImage(await r.blob());
+    store.set("background", b.id); idbSet("background", null);
+  } else {
+    bgBitmap = await decodeImage(b.file);
+    idbSet("background", b.file); store.set("background", "upload");
+  }
+  $("#bgImage").hidden = false; drawBg(); $("#bgClear").hidden = false;
+  log(`Background: ${b.name}`);
+}
 $("#bgInput").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
-  try {
-    bgBitmap = await decodeImage(f);
-    idbSet("background", f);
-    $("#bgImage").hidden = false; drawBg(); $("#bgClear").hidden = false;
-    log(`Background: ${f.name} (${bgBitmap.width}×${bgBitmap.height})`);
-  } catch (err) { log(`Couldn't display ${f.name}: the browser can't decode this image. Try saving it as a regular .jpg or .png.`); }
+  try { await applyBackground({ kind: "upload", name: f.name, file: f }); }
+  catch (err) { log(`Couldn't display ${f.name}: the browser can't decode this image. Try saving it as a regular .jpg or .png.`); }
 };
-$("#bgClear").onclick = () => { bgBitmap = null; $("#bgImage").hidden = true; $("#bgClear").hidden = true; idbSet("background", null); };
+$("#bgClear").onclick = () => { applyBackground(null); };
 $("#fileInput").onchange = e => { if (e.target.files.length) addFiles(e.target.files); e.target.value = ""; };
 
 const stage = $("#stage"); let dragDepth = 0;
@@ -1316,33 +1383,123 @@ function fillVoices() {
   sel.value = keep;
   sel.onchange = () => { TTS.voice = sel.value === "" ? null : voices[+sel.value]; };
 }
-fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = fillVoices;
+fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = fillVoices();
+
+/* ---------------------------------------------------------------- in-stage picker
+   In the embedded (voice-stage) view the full page chrome is hidden, so the
+   character, framing and background are chosen here: a small gear button opens
+   the same options, and every change goes through the shared handlers above —
+   so it's remembered (localStorage / IndexedDB, same origin) and reaches the
+   voice app over the existing message channel. */
+(function initPicker() {
+  const pc = $("#pickChar"), pf = $("#pickFraming"), pb = $("#pickBg"), st = $("#pickStatus");
+  if (!pc || !pf || !pb || !st) return;   // not present in the full page build
+  // Character list mirrors the main #charSelect (built-in + shipped + uploaded).
+  const syncChar = () => {
+    const cur = currentChar && currentChar.id;
+    pc.innerHTML = "";
+    for (const c of chars) { const o = document.createElement("option"); o.value = c.id; o.textContent = c.name; pc.appendChild(o); }
+    if (cur) pc.value = cur;
+  };
+  const syncBgs = () => {
+    const s = store.get("background");
+    pb.innerHTML = "";
+    const mk = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; pb.appendChild(o); };
+    mk("", "None");
+    for (const b of shippedBgs) mk(b.id, b.name);
+    if (s === "upload") mk("upload", "Uploaded image");
+    pb.value = s || "";
+  };
+  if (pf) pf.value = store.get("framing") || "bust";
+  syncChar(); syncBgs();
+  $("#picker").hidden = false;   // the gear is always available; it's a small corner control
+  $("#pickerToggle").onclick = () => $("#pickerBody").hidden = !$("#pickerBody").hidden;
+  $("#pickClose").onclick = () => $("#pickerBody").hidden = true;
+  pc.onchange = () => selectCharacter(pc.value);
+  pf.onchange = () => { $("#framing").value = pf.value; VrmAvatar.frame(pf.value); store.set("framing", pf.value); };
+  pb.onchange = () => {
+    if (!pb.value) { applyBackground(null); return; }
+    if (pb.value === "upload") { log("Upload a new background image to replace the saved one."); $("#bgInput").click(); return; }
+    applyBackground(shippedBgs.find(b => b.id === pb.value));
+  };
+  // keep the character list in sync when one is added (e.g. a .vrm is uploaded)
+  new MutationObserver(syncChar).observe($("#charSelect"), { subtree: true, childList: true });
+})();
+
+/* ---------------------------------------------------------------- 3D fallback
+   If a 3D model renders too slowly for the device (phones/tablets), switch back
+   to the 2D character and say so, so the stage never becomes an unresponsive
+   sliver of animation. Checked once ~12 s after a 3D character is shown, using
+   the renderer's per-frame cost (avg ms per frame; >60 ms is <17 fps). */
+let fpsCheckArmed = false;
+function armFpsCheck() { fpsCheckArmed = true; }
+setInterval(() => {
+  if (!fpsCheckArmed) return;
+  fpsCheckArmed = false;
+  if (active !== VrmAvatar || !VrmAvatar.vrm) return;
+  const ms = VrmAvatar.fps();   // null until 30 frames are measured
+  if (ms == null) return;
+  if (ms > 60) {
+    const was = currentChar;
+    threeBroken = true; store.set("threeBroken", "1");
+    log(`3D is running too slowly on this device (~${Math.round(1000 / ms)} fps), so it's falling back to the 2D character. Pick a 3D character again to retry.`);
+    selectCharacter("mochi");
+    emit("fallback2d", { from: was && was.id, fps: Math.round(1000 / ms) });
+  }
+}, 1200);
 
 /* ---------------------------------------------------------------- main loop */
 let last = now();
+let hidden = false;
+document.addEventListener("visibilitychange", () => { hidden = document.hidden; if (!hidden) { last = now(); resize(); } });
+// When the voice stage shrinks (terminal or side panel open) a full-body framing
+// is unreadable, so use face framing while small and return to the saved choice
+// when it grows again.
+let autoFace = false;
+function resize() {
+  if (EMBED) {
+    const w = $("#stage").clientWidth;
+    const want = w < 160;
+    if (want !== autoFace) { autoFace = want; if (want) VrmAvatar.frame("face"); else if (store.get("framing")) VrmAvatar.frame(store.get("framing")); }
+  }
+}
+new ResizeObserver(resize).observe($("#stage"));
 function loop() {
+  if (hidden) return;                     // paused: tab hidden, nothing to draw
   const t = now(); const dt = Math.min(.05, (t - last) / 1000); last = t;
   step(t, dt);
   active.apply(dt);
   requestAnimationFrame(loop);
 }
 fillCharSelect();
-// Restore the last character, framing and background (set in the full page, reused when embedded).
+// Restore the last character, framing and background (set in the full page or in
+// the in-stage picker, reused when embedded).
 (async () => {
   const saved = store.get("character"), framing = store.get("framing");
   if (framing) { $("#framing").value = framing; VrmAvatar.frame(framing); }
-  const bg = await idbGet("background");
-  if (bg) try { bgBitmap = await decodeImage(bg); $("#bgImage").hidden = false; drawBg(); $("#bgClear").hidden = false; } catch {}
+  const bid = store.get("background");
+  if (bid) {
+    const sh = shippedBgs.find(b => b.id === bid);
+    if (sh) { try { await applyBackground(sh); } catch { log(`Couldn't restore background ${sh.name}.`); } }
+    else if (bid === "upload") { const f = await idbGet("background"); if (f) try { await applyBackground({ kind: "upload", name: f.name, file: f }); } catch {} }
+  }
   if (saved && saved.startsWith("file:")) {
     const f = await idbGet("characterFile");
     if (f) { addFiles([new File([f], f.name || "avatar.vrm")]); return; }
   }
-  await selectCharacter(saved && chars.some(c => c.id === saved) ? saved : "mochi");
-  if (framing) VrmAvatar.frame(framing);
+  // If 3D is known-broken on this device (no WebGL, or it ran too slow), restore
+  // the 2D character instead of re-failing. Picking a 3D one again retries it.
+  const want = saved && chars.some(c => c.id === saved) ? saved : "mochi";
+  if (threeBroken && want !== "mochi") {
+    log("3D was unavailable on this device, so the last 3D character isn't being restored. Pick it again to retry.");
+    await selectCharacter("mochi");
+    return;
+  }
+  await selectCharacter(want);
+  if (framing && !autoFace) VrmAvatar.frame(framing);
+  if (EMBED) resize();
 })();
 syncChips();
-log(window.AVATAR_NO_CHARACTER_FILE
-  ? "Ready. No characters.js next to this file, so only the built-in character is listed. Drag in a .vrm to try others."
-  : `Ready. ${chars.length - 1} extra character${chars.length === 2 ? "" : "s"} listed in characters.js.`);
+log(`Ready. ${chars.length - 1} characters and ${shippedBgs.length} backgrounds available in the picker.`);
 requestAnimationFrame(loop);
 })();
