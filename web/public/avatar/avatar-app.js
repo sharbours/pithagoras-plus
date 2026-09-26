@@ -68,6 +68,18 @@ function requestCollapse() {
   if (IN_IFRAME) window.parent.postMessage({ avatarRequest: { action: "collapse" } }, "*");
   else if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
+/* Panel size (X = width, Y = height, % of the host voice stage). The avatar lives
+   in an iframe and can't resize its own window, so the sliders ask the host
+   ({action:"size"}) and the host answers with the size it applied ({panelSize}).
+   The host persists the choice; the page only mirrors it in its sliders. */
+let panelX = 100, panelY = 100;
+function applyPanelSize(x, y) {
+  panelX = clamp(Math.round(+x || 100), 20, 100);
+  panelY = clamp(Math.round(+y || 100), 20, 100);
+  const ex = $("#pickX"), ey = $("#pickY");
+  if (ex) ex.value = panelX;
+  if (ey) ey.value = panelY;
+}
 
 /* The three.js + VRM stack (avatar-libs.js, ~1.7 MB) is loaded lazily: only when
    a 3D character is first requested. The built-in 2D character never needs it,
@@ -532,6 +544,7 @@ function command(c) {
   if (c.state && Object.keys(c).length === 1) { setConversationState(c.state); return; }
   log(`← command ${JSON.stringify(c)}`);
   if (c.full !== undefined) { setFull(!!c.full); return; }   // host tells us enlarged vs. small (shows/hides the ✕)
+  if (c.panelSize) { applyPanelSize(c.panelSize.x, c.panelSize.y); return; }   // host tells us the applied panel size (syncs the X/Y sliders)
   if (c.mode) setMode(c.mode);
   if (c.character) selectCharacter(c.character);
   if (c.stop) stopSpeech();
@@ -1492,6 +1505,20 @@ fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged =
   if (pe) pe.onclick = requestExpand;
   const fc = $("#fullClose");
   if (fc) fc.onclick = requestCollapse;
+  // X/Y panel-size sliders: next to ⛶, they resize the host's avatar panel
+  // (any size from 20% up to the full enlarged view). The avatar is an iframe,
+  // so they only mean something inside a host — hidden on the standalone page,
+  // where ⛶ uses the browser's own fullscreen instead.
+  const sx = $("#pickX"), sy = $("#pickY");
+  if (!IN_IFRAME) { if (sx) sx.hidden = true; if (sy) sy.hidden = true; }
+  const sendSize = () => {
+    if (!IN_IFRAME || !sx || !sy) return;
+    panelX = clamp(Math.round(+sx.value), 20, 100);
+    panelY = clamp(Math.round(+sy.value), 20, 100);
+    window.parent.postMessage({ avatarRequest: { action: "size", x: panelX, y: panelY } }, "*");
+  };
+  if (sx) sx.oninput = sendSize;
+  if (sy) sy.oninput = sendSize;
   document.addEventListener("fullscreenchange", () => setFull(!!document.fullscreenElement));
 })();
 

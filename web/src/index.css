@@ -156,9 +156,9 @@
 .voice-stage.is-avatar-expanded { overflow: hidden; }
 .voice-stage.is-avatar-expanded .voice-presence {
   left: 0; top: 0; transform: none;
-  width: calc(100% - 28px);
-  height: calc(100% - 128px);
-  max-width: calc(100% - 28px);
+  width: calc((100% - 28px) * var(--avatar-x, 100) / 100);
+  height: calc((100% - 128px) * var(--avatar-y, 100) / 100);
+  max-width: calc((100% - 28px) * var(--avatar-x, 100) / 100);
   display: flex; align-items: center; justify-content: center;
   padding: 14px;
   background: color-mix(in srgb, rgb(var(--surface)) 62%, transparent);

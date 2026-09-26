@@ -21,9 +21,14 @@ body{font-family:"M PLUS Rounded 1c","Nunito",ui-rounded,"Segoe UI",system-ui,sa
   transition:all .6s cubic-bezier(.22,1,.36,1);}
 .avatar{width:100%;line-height:0;transition:width .6s cubic-bezier(.22,1,.36,1)}
 .avatar iframe{display:block;width:100%;aspect-ratio:1;height:auto;border:0;background:transparent}
-/* Near-fullscreen: the slot grows to a centred near-viewport panel. */
-.stage.is-full .presence{left:0;top:0;transform:none;width:calc(100% - 24px);
-  height:calc(100% - 24px);max-width:calc(100% - 24px);padding:14px;
+/* Near-fullscreen: the slot grows to a centred panel. --avatar-x / --avatar-y
+   (set by the host from the avatar page's X/Y sliders, 20-100) scale it; 100/100
+   is the original near-fullscreen panel. */
+.stage.is-full .presence{left:0;top:0;transform:none;
+  width:calc((100% - 24px) * var(--avatar-x, 100) / 100);
+  height:calc((100% - 24px) * var(--avatar-y, 100) / 100);
+  max-width:calc((100% - 24px) * var(--avatar-x, 100) / 100);
+  padding:14px;
   display:flex;align-items:center;justify-content:center;
   background:color-mix(in srgb, var(--surface) 55%, transparent);
   border:1px solid var(--line);border-radius:24px;backdrop-filter:blur(8px);
@@ -51,7 +56,8 @@ body{font-family:"M PLUS Rounded 1c","Nunito",ui-rounded,"Segoe UI",system-ui,sa
   <div class="stage" id="stage">
     <div class="hint">
       <b>Full-view preview</b> — mirrors the production voice stage. Click the avatar's <b>⛶</b> button
-      (bottom-left, next to the gear) to enlarge the avatar to a near-fullscreen view. Close it with the
+      (bottom-left, next to the gear) to enlarge the avatar to a near-fullscreen view, then use the
+      <b>X / Y sliders</b> beside it to set the panel's width and height. Close it with the
       <b>✕</b> in the upper-right, or press <b>Esc</b>. The same iframe is reused, so your character,
       framing, position and background carry over with no reload.
     </div>
@@ -64,22 +70,37 @@ body{font-family:"M PLUS Rounded 1c","Nunito",ui-rounded,"Segoe UI",system-ui,sa
   const stage = document.getElementById("stage");
   const frame = document.getElementById("frame");
   const post = (m) => frame.contentWindow?.postMessage({ avatar: m }, location.origin);
-  let full = false;
+  let full = false, size = { x: 100, y: 100 };
+  try {
+    const saved = JSON.parse(localStorage.getItem("voiceAvatarSize") || "");
+    if (saved && +saved.x && +saved.y) size = { x: Math.max(20, Math.min(100, +saved.x)), y: Math.max(20, Math.min(100, +saved.y)) };
+  } catch {}
   function setFull(on) {
     full = on;
     stage.classList.toggle("is-full", on);
     post({ full: on });          // drive the avatar page's enlarged state (its ✕ hides itself in-iframe)
   }
-  // The avatar page's own ⛶ asks its host (this window) to enlarge; its ✕ / Esc collapse it.
+  function setSize(x, y) {
+    size = { x: Math.max(20, Math.min(100, Math.round(+x || 100))), y: Math.max(20, Math.min(100, Math.round(+y || 100))) };
+    stage.style.setProperty("--avatar-x", size.x);
+    stage.style.setProperty("--avatar-y", size.y);
+    localStorage.setItem("voiceAvatarSize", JSON.stringify(size));
+    setFull(true);               // sizing the panel implies the enlarged view
+    post({ panelSize: size });   // mirror the applied size onto the avatar page's sliders
+  }
+  // The avatar page's ⛶ asks its host (this window) to enlarge; its ✕ / Esc collapse it;
+  // its X/Y sliders ask for a specific panel size.
   window.addEventListener("message", (e) => {
     const req = e.data && e.data.avatarRequest;
     if (!req || typeof req.action !== "string") return;
     if (e.origin !== location.origin && e.origin !== "null") return;
-    setFull(req.action === "expand");
+    if (req.action === "expand") setFull(true);
+    else if (req.action === "collapse") setFull(false);
+    else if (req.action === "size") setSize(req.x, req.y);
   });
   document.getElementById("closeBtn").onclick = () => setFull(false);
   window.addEventListener("keydown", (e) => { if (e.key === "Escape" && full) setFull(false); });
-  frame.addEventListener("load", () => post({ full }));
+  frame.addEventListener("load", () => { post({ full }); post({ panelSize: size }); });
 </script>
 </body>
 </html>

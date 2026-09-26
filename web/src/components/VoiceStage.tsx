@@ -2,7 +2,7 @@ import { ActivityProgress } from './ActivityProgress';
 import type { Activity } from '../transcript';
 import { useWorkPanels } from "../use-work-panels";
 import { VoiceToolActivity } from "./VoiceToolActivity";
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject } from "react";
 import { buildTranscript } from "../transcript";
 import { LuMic, LuMicOff, LuX, LuGlobe, LuMaximize2, LuMinus, LuVolume2, LuVolumeX, LuTerminal, LuFileText, LuUser, LuCircle } from "react-icons/lu";
 import { AvatarFrame } from "./AvatarFrame";
@@ -109,13 +109,30 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
   // Escape) post "collapse". We grow the avatar's slot and tell the frame it's full so
   // its own ✕ shows.
   const [avatarFull, setAvatarFull] = useState(false);
+  // X/Y panel size, in % of the voice stage, set by the avatar page's sliders next
+  // to ⛶ (post {action:"size"}). 100/100 is the original near-fullscreen panel;
+  // the choice is remembered per browser and reused the next time ⛶ expands.
+  const [avatarSize, setAvatarSize] = useState<{ x: number; y: number }>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("voiceAvatarSize") || "");
+      if (saved && +saved.x && +saved.y) return { x: Math.max(20, Math.min(100, +saved.x)), y: Math.max(20, Math.min(100, +saved.y)) };
+    } catch {}
+    return { x: 100, y: 100 };
+  });
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const req = event.data && event.data.avatarRequest;
       if (!req || typeof req.action !== "string") return;
       // Only honour requests from our own avatar frame (same-origin portal origin).
       if (event.origin !== location.origin && event.origin !== "null") return;
-      setAvatarFull(req.action === "expand");
+      if (req.action === "expand") { setAvatarFull(true); return; }
+      if (req.action === "collapse") { setAvatarFull(false); return; }
+      if (req.action === "size") {
+        const size = { x: Math.max(20, Math.min(100, Math.round(+req.x || 100))), y: Math.max(20, Math.min(100, Math.round(+req.y || 100))) };
+        setAvatarSize(size);
+        localStorage.setItem("voiceAvatarSize", JSON.stringify(size));
+        setAvatarFull(true);   // sizing the panel implies the enlarged view
+      }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -166,7 +183,7 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
   const input = !muted && phase === "Hearing you";
   const mode: OrbMode = input ? "input" : speaking ? "output" : muted ? "muted" : "idle";
   const status = starting ? "Connecting" : input ? "Hearing you" : speaking ? "Speaking" : phase === "Speaking" ? "Preparing your reply" : phase === "Thinking" ? "Thinking" : phase === "Transcribing" ? "Transcribing" : muted ? "Microphone muted" : "Listening";
-  return <section className={`voice-stage ${shown ? 'is-browsing' : ''} ${terminalShown ? 'is-terminal' : ''} ${avatarFull ? 'is-avatar-expanded' : ''}`} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(canvasOpen)} data-mode={mode}>
+  return <section className={`voice-stage ${shown ? 'is-browsing' : ''} ${terminalShown ? 'is-terminal' : ''} ${avatarFull ? 'is-avatar-expanded' : ''}`} style={avatarFull ? ({ "--avatar-x": avatarSize.x, "--avatar-y": avatarSize.y } as CSSProperties) : undefined} aria-label="Voice conversation" data-panels={Number(shown) + Number(terminalShown) + Number(canvasOpen)} data-mode={mode}>
     <header className="voice-stage-header">
       <span className="voice-stage-session">{title}</span>
       <div className="voice-utilities">
@@ -191,7 +208,7 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
     <VoiceToolActivity events={toolEvents} />
     <div className="voice-presence">
       {avatarFull && <button type="button" className="voice-avatar-close" onClick={() => setAvatarFull(false)} title="Return to the small avatar" aria-label="Return to the small avatar">✕</button>}
-      <div className="voice-avatar">{face === "avatar" ? <AvatarFrame phase={phase} speaking={speaking} muted={muted} levels={levels} full={avatarFull} /> : <VoiceOrb mode={mode} levels={levels} />}</div>
+      <div className="voice-avatar">{face === "avatar" ? <AvatarFrame phase={phase} speaking={speaking} muted={muted} levels={levels} full={avatarFull} size={avatarSize} /> : <VoiceOrb mode={mode} levels={levels} />}</div>
       <div className="voice-dock-center">
         {workPhase && ['processing the prompt','compacting the conversation'].includes(workPhase.label) ? <ActivityProgress phase={workPhase} compact /> : <>
         <div className="voice-status" role="status"><span />{phase === 'Compacting context' ? phase : thought && (shown || terminalShown) ? 'Thinking' : status}</div>

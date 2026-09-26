@@ -64,7 +64,8 @@ select{background:var(--chip);border:1px solid var(--line);border-radius:10px;pa
 /* In-voice-stage picker: a small gear button (bottom-left, out of the way) that
    opens character / framing / background selectors over the transparent stage. */
 .picker{position:absolute;left:10px;bottom:10px;z-index:6;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
-.picker-row{display:flex;gap:6px}
+.picker-row{display:flex;gap:6px;align-items:center}
+.picker-row .pick-size{width:76px;height:34px;accent-color:var(--accent);cursor:pointer}
 .picker-toggle{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--bubble);cursor:pointer;font-size:16px;display:grid;place-items:center;color:var(--ink)}
 .picker-toggle:hover{background:var(--accent-soft)}
 .picker-body{background:var(--bubble);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:230px;max-width:70vw;box-shadow:0 6px 24px rgba(20,10,40,.18)}
@@ -181,7 +182,7 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
       <div class="loading" id="loading" hidden>Loading character…</div>
       <div class="drop-hint" id="dropHint" hidden>Drop a .vrm file (and any texture files) to load it</div>
       <div class="picker" id="picker" hidden>
-        <div class="picker-row"><button class="picker-toggle" id="pickerToggle" title="Choose character and background">⚙</button><button class="picker-toggle" id="pickExpand" title="Enlarge the avatar" aria-label="Enlarge the avatar">⛶</button></div>
+        <div class="picker-row"><button class="picker-toggle" id="pickerToggle" title="Choose character and background">⚙</button><input class="pick-size" type="range" id="pickX" min="20" max="100" step="5" value="100" title="Panel width" aria-label="Avatar panel width"><input class="pick-size" type="range" id="pickY" min="20" max="100" step="5" value="100" title="Panel height" aria-label="Avatar panel height"><button class="picker-toggle" id="pickExpand" title="Enlarge the avatar" aria-label="Enlarge the avatar">⛶</button></div>
         <div class="picker-body" id="pickerBody" hidden>
           <label>Character <select id="pickChar"></select></label>
           <label>Framing <select id="pickFraming">
