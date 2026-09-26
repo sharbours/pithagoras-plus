@@ -17,6 +17,32 @@ const store = {
   set(k, v) { try { v == null ? localStorage.removeItem("avatarLab." + k) : localStorage.setItem("avatarLab." + k, v); } catch {} },
 };
 
+/* ---------------------------------------------------------------- horizontal position
+   The character is drawn center-anchored in the stage. `posFrac` is where the
+   character's center sits across the stage's width: 0 = flush left, 0.5 = centered,
+   1 = flush right. The voice stage defaults it left so the right side is open for
+   future features. The 2D and 3D layers share one transform so they never drift
+   apart, and both headScreen() callers add the same pixel offset so emotes stay
+   over the head. The background canvas is untouched (it still fills the stage). */
+let posFrac = 0.5;   // default until restore()/the picker runs
+function applyPos() {
+  const t = (posFrac - 0.5) * 100;             // % of the stage width (each layer is 100% wide)
+  for (const id of ["#svgAvatar", "#vrmCanvas"]) {
+    const el = $(id); if (!el) continue;
+    el.style.transform = `translateX(${t}%)`;
+  }
+}
+// Shared handler for the position slider. Persists per browser and shifts the shared
+// character layer (both the 2D SVG and the 3D canvas carry the same CSS transform, so
+// they stay in sync). The gear picker (present on the standalone page AND in the voice
+// stage) is the only control, so it works wherever the avatar is embedded.
+function setPos(frac) {
+  posFrac = clamp(frac, 0, 1);
+  store.set("position", String(Math.round(posFrac * 100)));
+  applyPos();
+  const sel = $("#pickPos"); if (sel) sel.value = Math.round(posFrac * 100);
+}
+
 /* The three.js + VRM stack (avatar-libs.js, ~1.7 MB) is loaded lazily: only when
    a 3D character is first requested. The built-in 2D character never needs it,
    so opening the page on a phone doesn't pay for a 3D engine it may not use. */
@@ -784,7 +810,8 @@ const SvgAvatar = (() => {
     const m = svg.getScreenCTM(); const r = $("#stage").getBoundingClientRect();
     if (!m) return { x: r.width * .65, y: r.height * .2 };
     const pt = svg.createSVGPoint(); pt.x = 292; pt.y = 104 + S.pose.hx * 26 - S.pose.by * 22;
-    const s = pt.matrixTransform(m); return { x: s.x - r.left, y: s.y - r.top };
+    const s = pt.matrixTransform(m);
+    return { x: s.x - r.left + (posFrac - .5) * r.width, y: s.y - r.top };   // + the shared horizontal shift
   }
   return { apply, headScreen, show(v) { svg.style.display = v ? "" : "none"; } };
 })();
@@ -1077,7 +1104,7 @@ const VrmAvatar = (() => {
     if (!vrm) return { x: r.width * .65, y: r.height * .2 };
     const head = vrm.humanoid.getRawBoneNode("head"); const v = new THREE.Vector3();
     head.getWorldPosition(v); v.x += .13; v.y += .17; v.project(camera);
-    return { x: (v.x + 1) / 2 * r.width, y: (1 - v.y) / 2 * r.height };
+    return { x: (v.x + 1) / 2 * r.width + (posFrac - .5) * r.width, y: (1 - v.y) / 2 * r.height };   // + the shared shift
   }
   function meta() { return vrm && vrm.meta; }
   return { load, apply, headScreen, frame, meta, lastLoad: () => lastLoad, get vrm() { return vrm; },
@@ -1392,7 +1419,7 @@ fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged =
    so it's remembered (localStorage / IndexedDB, same origin) and reaches the
    voice app over the existing message channel. */
 (function initPicker() {
-  const pc = $("#pickChar"), pf = $("#pickFraming"), pb = $("#pickBg"), st = $("#pickStatus");
+  const pc = $("#pickChar"), pf = $("#pickFraming"), pb = $("#pickBg"), pp = $("#pickPos"), st = $("#pickStatus");
   if (!pc || !pf || !pb || !st) return;   // not present in the full page build
   // Character list mirrors the main #charSelect (built-in + shipped + uploaded).
   const syncChar = () => {
@@ -1411,12 +1438,19 @@ fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged =
     pb.value = s || "";
   };
   if (pf) pf.value = store.get("framing") || "bust";
+  // Position: left-justified by default in the voice stage (embed) so the right side
+  // stays open for future features; centered on the standalone page. User choice wins.
+  const savedPos = store.get("position");
+  if (savedPos != null) posFrac = clamp(+savedPos / 100, 0, 1);
+  else if (EMBED) posFrac = 0.2;
+  if (pp) pp.value = Math.round(posFrac * 100);
   syncChar(); syncBgs();
-  $("#picker").hidden = false;   // the gear is always available; it's a small corner control
+  $("#picker").hidden = false;
   $("#pickerToggle").onclick = () => $("#pickerBody").hidden = !$("#pickerBody").hidden;
   $("#pickClose").onclick = () => $("#pickerBody").hidden = true;
   pc.onchange = () => selectCharacter(pc.value);
   pf.onchange = () => { $("#framing").value = pf.value; VrmAvatar.frame(pf.value); store.set("framing", pf.value); };
+  if (pp) pp.oninput = () => setPos(pp.value / 100);
   pb.onchange = () => {
     if (!pb.value) { applyBackground(null); return; }
     if (pb.value === "upload") { log("Upload a new background image to replace the saved one."); $("#bgInput").click(); return; }
@@ -1489,6 +1523,12 @@ fillCharSelect();
 // the in-stage picker, reused when embedded).
 (async () => {
   const saved = store.get("character"), framing = store.get("framing");
+  // Position: honor a saved value (initPicker already defaulted it — left in the voice
+  // stage, center on the standalone page — when it ran). The CSS shift applies to both
+  // the 2D and 3D character layer, so it works before the 3D stack finishes loading.
+  const p0 = store.get("position");
+  if (p0 != null) posFrac = clamp(+p0 / 100, 0, 1);
+  applyPos();
   if (framing) { $("#framing").value = framing; VrmAvatar.frame(framing); }
   const bid = store.get("background");
   if (bid) {

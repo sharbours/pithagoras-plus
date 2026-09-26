@@ -69,6 +69,8 @@ select{background:var(--chip);border:1px solid var(--line);border-radius:10px;pa
 .picker-body{background:var(--bubble);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:230px;max-width:70vw;box-shadow:0 6px 24px rgba(20,10,40,.18)}
 .picker-body label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;white-space:nowrap}
 .picker-body select{flex:1;min-width:0}
+.picker-body label:has(> input[type=range]){display:flex}
+.picker-body input[type=range]{flex:1;width:auto;accent-color:var(--accent)}
 .picker-actions{display:flex;gap:8px}
 .picker-actions .btn{padding:5px 10px;font-size:13px}
 .picker .hint{margin:0;font-size:12px;color:var(--muted);min-height:1em}
@@ -170,6 +172,7 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
             <option value="bust">Upper body</option>
             <option value="full">Full body</option>
           </select></label>
+          <label>Position <input type="range" id="pickPos" min="0" max="100" step="1" value="50" aria-label="Horizontal position in the stage"></label>
           <label>Background <select id="pickBg"></select></label>
           <div class="picker-actions">
             <button class="btn" id="pickUploadBg">Upload image…</button>
