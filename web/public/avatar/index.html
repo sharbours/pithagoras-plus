@@ -31,7 +31,7 @@ html.embed, html.embed body{background:transparent}
    and the message channel. */
 html.embed .bar, html.embed .panel, html.embed .stage-top, html.embed .credit, html.embed .subtitle{display:none !important}
 html.embed #bgImage{z-index:0}
-html.embed .app{grid-template-rows:1fr} html.embed .layout{grid-template-columns:1fr}
+html.embed .app{grid-template-rows:1fr;height:100%} html.embed .layout{grid-template-columns:1fr;grid-template-rows:1fr}
 html.embed .stage{background:none} html.embed .stage::after{display:none}
 [hidden]{display:none !important}
 html,body{height:100%;margin:0}
@@ -133,10 +133,14 @@ textarea{min-height:108px;resize:vertical;font-size:14px}
 .log{font-size:12px;color:var(--muted);max-height:150px;overflow:auto;background:var(--chip);border:1px solid var(--line);border-radius:10px;padding:8px 10px;white-space:pre-wrap;word-break:break-word}
 code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border-radius:5px;padding:0 4px}
 
+/* Mobile/narrow layout for the STANDALONE page only. The embedded (voice-stage)
+   iframe is always narrow, so this must NOT fire there: in embed the stage must
+   fill the whole iframe (100% height). Otherwise the character + background stop
+   at 62vh and the bottom third shows the host's white background. */
 @media (max-width: 860px){
-  .layout{grid-template-columns:1fr;grid-template-rows:62vh auto}
-  .panel{border-left:none;border-top:1px solid var(--line);overflow:visible}
-  .app{height:auto}
+  html:not(.embed) .layout{grid-template-columns:1fr;grid-template-rows:62vh auto}
+  html:not(.embed) .panel{border-left:none;border-top:1px solid var(--line);overflow:visible}
+  html:not(.embed) .app{height:auto}
 }
 </style>
 <script src="avatar-boot.js"></script>
