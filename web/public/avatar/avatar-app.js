@@ -490,7 +490,12 @@ window.avatar = {
   get state() { return { mode: S.mode, emotion: S.target.emotion, speaking: S.speaking, character: currentChar && currentChar.id }; },
   emotions: EMOTIONS, gestures: Object.keys(GESTURES), poses: Object.keys(KARATE), setPose, _dur: n => GESTURES[n] ? GESTURES[n].dur : 0, _HP: HP, _vrm: () => VrmAvatar.vrm,
 };
-window.addEventListener("message", e => { if (e.data && e.data.avatar) command(e.data.avatar); });
+// Same-origin only: the embedded frame lives on the portal's origin, and the
+// standalone page is opened on the same origin. file:// has origin "null" —
+// allow it so local testing without a server still works.
+const SELF_ORIGIN = location.origin !== "null" ? location.origin : null;
+function fromUs(e) { return SELF_ORIGIN === null || e.origin === SELF_ORIGIN; }
+window.addEventListener("message", e => { if (fromUs(e) && e.data && e.data.avatar) command(e.data.avatar); });
 let bc = null;
 try { bc = new BroadcastChannel("avatar-lab"); bc.onmessage = e => { if (e.data && e.data.avatar) command(e.data.avatar); }; } catch {}
 
