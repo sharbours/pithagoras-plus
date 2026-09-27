@@ -4,7 +4,8 @@ Hermes (on **`.197`, a Proxmox LXC**) drives a Chromium on its own host; the por
 shows it live in the voice stage's floating window and opens that window whenever the browser
 navigates. Both hosts are private LAN boxes; all cross-host traffic travels through one
 key-restricted SSH tunnel. This document is the **as-built** record of the 2026-09-27 deployment —
-it differs from a generic install in ways noted in *Adaptations* and *Gotchas*.
+it differs from a generic install in ways noted in *Adaptations* and *Gotchas*. The companion
+**voice stack** (STT Whisper + TTS Kokoro) as-built doc is [`deploy/voice/README.md`](../voice/README.md).
 
 ```
 .197  Chromium container (host network)            .210  portal
