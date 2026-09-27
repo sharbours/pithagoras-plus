@@ -81,6 +81,22 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
   const epoch = useRef(0);
   const mounted = useRef(false);
   const voice = useRef<HandsFreeVoice | null>(null);
+  // The active avatar's Kokoro voice, reported by the /avatar/ iframe over
+  // postMessage (it stores a voice per character and re-sends on character
+  // change and on voice-mode start). Included in every TTS request so the
+  // portal's TTS speaks each character with the voice assigned to it.
+  const kokoroVoiceRef = useRef("");
+  // Consume the avatar's reported Kokoro voice (broadcast as a window event by
+  // AvatarFrame, which relays the iframe's postMessage). Kept in a ref (not
+  // state) so a voice change never re-renders/restarts an active session.
+  useEffect(() => {
+    const onVoice = (e: Event) => {
+      const voice = (e as CustomEvent).detail?.voice;
+      if (typeof voice === "string" && voice) kokoroVoiceRef.current = voice;
+    };
+    window.addEventListener("pith-kokoro-voice", onVoice);
+    return () => window.removeEventListener("pith-kokoro-voice", onVoice);
+  }, []);
   const vad = useRef<MicVAD | null>(null);
   const vadSettings = useRef(DEFAULT_VAD);
   const sequential = useRef(false);
@@ -205,7 +221,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
       signal.throwIfAborted();
       response = await fetch(`/api/sessions/${sessionId}/voice/speech`, {
         method: "POST", headers: { "Content-Type": "application/json", "Accept": "audio/pcm" },
-        body: JSON.stringify({ text, source: "voice" }), signal,
+        body: JSON.stringify(kokoroVoiceRef.current ? { text, source: "voice", voice: kokoroVoiceRef.current } : { text, source: "voice" }), signal,
       });
       if (response.ok) break;
       mark('tts_retry',{http:response.status});

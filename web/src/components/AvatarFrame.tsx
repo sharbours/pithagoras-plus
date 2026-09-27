@@ -23,6 +23,22 @@ export function AvatarFrame({ phase, speaking, muted, levels, full, size }: {
   const latestState = useRef(state); latestState.current = state;
   const latestFull = useRef(!!full); latestFull.current = !!full;
   const latestSize = useRef(size ?? { x: 100, y: 100 }); latestSize.current = size ?? { x: 100, y: 100 };
+  // The avatar page stores a Kokoro voice per character and reports it here.
+  // Listen for its replies (postMessage from the same-origin iframe) and
+  // re-broadcast them as a window event the voice pipeline can consume.
+  useEffect(() => {
+    const onMsg = (event: MessageEvent) => {
+      const d = event.data;
+      if (!d || typeof d !== "object") return;
+      const isReply = d.avatarEvent === "kokoroVoice";
+      const isCharacterWithVoice = d.avatarEvent === "character" && typeof d.voice === "string";
+      if (!isReply && !isCharacterWithVoice) return;
+      const voice = typeof d.voice === "string" ? d.voice : "";
+      if (voice) window.dispatchEvent(new CustomEvent("pith-kokoro-voice", { detail: { voice } }));
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
   useEffect(() => { post({ state }); }, [state]);
   // Enlarged (near-fullscreen) mode: the voice stage grows the avatar's slot and the
   // avatar page shows its ✕ button in response. Re-sent on every change so a frame
@@ -50,5 +66,8 @@ export function AvatarFrame({ phase, speaking, muted, levels, full, size }: {
   }, []);
 
   return <iframe ref={frame} className="voice-avatar-frame" src="/avatar/index.html?embed=1" title="Avatar"
-    onLoad={() => { post({ state: latestState.current }); post({ full: latestFull.current }); post({ panelSize: { x: latestSize.current.x, y: latestSize.current.y } }); }} />;
+    onLoad={() => { post({ state: latestState.current }); post({ full: latestFull.current }); post({ panelSize: { x: latestSize.current.x, y: latestSize.current.y } });
+      // Ask the freshly-loaded page for its current character's Kokoro voice so
+      // the voice pipeline speaks this character correctly from the first word.
+      post({ kokoroVoice: {} }); }} />;
 }

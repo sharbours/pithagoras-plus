@@ -523,6 +523,30 @@ function speakOne(text, token) {
   return new Promise(res => setTimeout(() => { setTalking(false); res(); }, Math.max(700, text.length * 62) / TTS.rate));
 }
 
+/* ---------------------------------------------------------------- Kokoro voice (per character)
+   The voice the portal's TTS (Kokoro, pithagoras-kokoro :7863) uses to speak
+   this character. Stored per character in localStorage, so it sticks every
+   time the character is picked again. Shown by the "Speaking voice" selector
+   in the options panel and the in-stage picker; read by the voice app over the
+   postMessage channel (the {kokoroVoice:{query}} command below). Falls back to
+   the portal default (af_heart) when a character has no assigned voice. */
+const KOKORO_DEFAULT = (window.KOKORO_DEFAULT_VOICE || "af_heart");
+function kokoroVoiceKey(id) { return "avatarLab.voice." + id; }
+function KOKORO_VOICE() {
+  const id = currentChar && currentChar.id;
+  return (id ? store.get(kokoroVoiceKey(id)) : null) || KOKORO_DEFAULT;
+}
+function setKokoroVoice(v) {
+  if (!currentChar) return;
+  store.set(kokoroVoiceKey(currentChar.id), v || KOKORO_DEFAULT);
+  syncKokoroVoice();
+}
+function syncKokoroVoice() {
+  const sv = $("#kokoroVoice"), pv = $("#pickVoice");
+  if (sv) sv.value = KOKORO_VOICE();
+  if (pv) pv.value = KOKORO_VOICE();
+}
+
 /* ---------------------------------------------------------------- command API */
 /* Host-app integration: conversation state, external lip-sync level, and timed tag cues. */
 S.extMouth = 0; S.extMouthT = -1e9; S.conv = "idle";
@@ -557,6 +581,17 @@ function command(c) {
   // high-rate messages: handled quietly, no logging
   if (typeof c.mouth === "number") { S.extMouth = clamp(c.mouth, 0, 1); S.extMouthT = now(); if (Object.keys(c).length === 1) return; }
   if (c.state && Object.keys(c).length === 1) { setConversationState(c.state); return; }
+  // The voice app (same-origin iframe) asks for this character's Kokoro voice;
+  // answer quietly over the channel we arrived on (no log line — it fires per
+  // sentence, so logging would flood the panel).
+  if (c.kokoroVoice && typeof c.kokoroVoice === "object") {
+    const reply = { avatarEvent: "kokoroVoice", character: currentChar && currentChar.id,
+      voice: currentChar ? KOKORO_VOICE() : KOKORO_DEFAULT };
+    if (window.parent !== window) window.parent.postMessage(reply, "*");
+    try { bc && bc.postMessage(reply); } catch {}
+    if (ws && ws.readyState === 1) ws.send(JSON.stringify({ event: "kokoroVoice", ...reply }));
+    return;
+  }
   log(`← command ${JSON.stringify(c)}`);
   if (c.full !== undefined) { setFull(!!c.full); return; }   // host tells us enlarged vs. small (shows/hides the ✕)
   if (c.panelSize) { applyPanelSize(c.panelSize.x, c.panelSize.y); return; }   // host tells us the applied panel size (syncs the X/Y sliders)
@@ -584,6 +619,7 @@ window.avatar = {
   setEmotion: (e, i, h) => setEmotion(e, i, h),
   on: (name, fn) => ((listeners[name] ||= []).push(fn)),
   get state() { return { mode: S.mode, emotion: S.target.emotion, speaking: S.speaking, character: currentChar && currentChar.id }; },
+  get KOKORO_VOICE() { return KOKORO_VOICE(); },
   emotions: EMOTIONS, gestures: Object.keys(GESTURES), poses: Object.keys(KARATE), setPose, setBrightness: k => { VrmAvatar.setBrightness(k); }, _dur: n => GESTURES[n] ? GESTURES[n].dur : 0, _HP: HP, _vrm: () => VrmAvatar.vrm,
 };
 // Same-origin only: the embedded frame lives on the portal's origin, and the
@@ -1284,6 +1320,7 @@ async function selectCharacter(id) {
     }
     currentChar = c;
     store.set("character", c.id);
+    syncKokoroVoice();
     if (c.file) idbSet("characterFile", c.file);
     const m = c.kind === "vrm" && VrmAvatar.meta();
     $("#credit").textContent = c.credit || (m ? `${m.name || m.title || c.name}${m.authors ? " by " + m.authors.join(", ") : m.author ? " by " + m.author : ""}` : "");
@@ -1291,7 +1328,7 @@ async function selectCharacter(id) {
     const cc = $("#customChips"); cc.innerHTML = "";
     for (const n of customs) { const b = document.createElement("button"); b.className = "chip"; b.textContent = n; b.onclick = () => setCustomExpression(n, +$("#intensity").value, 3000); cc.appendChild(b); }
     $("#customWrap").hidden = !customs.length;
-    emit("character", { id: c.id, name: c.name, customExpressions: customs });
+    emit("character", { id: c.id, name: c.name, customExpressions: customs, voice: KOKORO_VOICE() });
   } catch (e) {
     log(`Character load failed: ${e.message}`);
     alert(`Couldn't load ${c.name}.\n\n${e.message}`);
@@ -1531,6 +1568,30 @@ function fillVoices() {
   sel.onchange = () => { TTS.voice = sel.value === "" ? null : voices[+sel.value]; };
 }
 fillVoices(); if ("speechSynthesis" in window) speechSynthesis.onvoiceschanged = fillVoices();
+
+/* Populate the "Speaking voice (Kokoro)" selectors — the standalone panel
+   (#kokoroVoice) and the in-stage picker (#pickVoice) — grouped by language.
+   The choice is per-character (see KOKORO_VOICE above); changing either
+   selector stores it for the current character. */
+function fillKokoroVoices() {
+  const voices = window.KOKORO_VOICES || [];
+  const groups = {};
+  for (const v of voices) (groups[v.g] ||= []).push(v);
+  for (const sel of [$("#kokoroVoice"), $("#pickVoice")]) {
+    if (!sel) continue;
+    const keep = sel.value; sel.innerHTML = "";
+    for (const g of Object.keys(groups)) {
+      const og = document.createElement("optgroup"); og.label = { US: "US English", UK: "British English", JP: "Japanese", ZH: "Mandarin", ES: "Spanish", FR: "French", HI: "Hindi", IT: "Italian", PT: "Brazilian Portuguese" }[g] || g;
+      for (const v of groups[g]) { const o = document.createElement("option"); o.value = v.id; o.textContent = v.t; og.appendChild(o); }
+      sel.appendChild(og);
+    }
+    if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
+  }
+  syncKokoroVoice();
+}
+fillKokoroVoices();
+if ($("#kokoroVoice")) $("#kokoroVoice").onchange = e => setKokoroVoice(e.target.value);
+if ($("#pickVoice")) $("#pickVoice").onchange = e => setKokoroVoice(e.target.value);
 
 /* ---------------------------------------------------------------- in-stage picker
    In the embedded (voice-stage) view the full page chrome is hidden, so the

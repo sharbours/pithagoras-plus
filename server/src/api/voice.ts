@@ -223,10 +223,16 @@ export function voiceRouter(): Router {
     const speechStarted=performance.now();
     let busyMs=0;
     const text = req.body?.text;
+    // Per-character Kokoro voice (Avatar Lab "Speaking voice"): a Kokoro voice id
+    // (af_heart, am_adam, ...) or an OpenAI alias (coral, nova, ...). Validated
+    // against a strict whitelist so a stray value can never alter the upstream
+    // request shape; an empty value keeps the adapter's global default.
+    const voice = typeof req.body?.voice === "string" && /^[a-zA-Z0-9_-]{1,32}$/.test(req.body.voice)
+      ? req.body.voice : "";
     // Diagnostic: which client synthesized this (voice vs read-aloud). Two
     // lines for the same text = the double-TTS "echo" bug is back.
     if (typeof text === "string" && text.trim())
-      console.log(`[voice/speech] session=${req.params.id} source=${req.body?.source ?? "unknown"} len=${text.length} ${JSON.stringify(text.slice(0,60))}`);
+      console.log(`[voice/speech] session=${req.params.id} source=${req.body?.source ?? "unknown"}${voice ? ` voice=${voice}` : ""} len=${text.length} ${JSON.stringify(text.slice(0,60))}`);
     if (typeof text !== "string" || !text.trim() || text.length > 600)
       return res.status(400).json({ error: "Speech text must contain 1–600 characters" });
     const settings = config();
@@ -266,6 +272,10 @@ export function voiceRouter(): Router {
           voice_ref: { type: "base64", data: reference!.audio.toString("base64") } };
       } else if (settings.runtime === "audio-cpp") {
         json = { model: "breeze", input: text, stream: true, stream_format: "audio", response_format: "pcm", options: { instruction, guidance_scale: String(settings.cfgScale), seed: "42", stream_frames_per_event: "8", stream_lookahead_margin: "4" } };
+        // The Kokoro TTS adapter (breezeUrl :7864) understands "voice": a
+        // per-character override from the avatar page; the adapter ignores it
+        // for other runtimes and falls back to its own KOKORO_VOICE default.
+        if (voice) json.voice = voice;
         if (reference) { json.voice_ref = { type: "base64", data: reference.audio.toString("base64") }; json.reference_text = reference.transcript; }
       } else {
         form = new FormData();

@@ -57,9 +57,18 @@ def _looks_chunked(b):
     return bool(CHUNK_HEAD_RE.match(b)) or b.endswith(b"0\r\n\r\n")
 
 
-def call_upstream(text):
-    """Non-streaming POST to Kokoro over a raw socket. -> (status, headers, body)."""
-    body = json.dumps({"model": "kokoro", "input": text, "voice": VOICE,
+# A Kokoro voice id (af_heart, am_adam, ...) or an OpenAI alias (coral, nova, ...).
+# Strict whitelist: letters/digits/hyphen/underscore only, so a stray value can
+# never inject a field into the Kokoro request or log a secret.
+VOICE_ID_RE = re.compile(r"[a-zA-Z0-9_-]{1,32}")
+
+
+def call_upstream(text, voice=""):
+    """Non-streaming POST to Kokoro over a raw socket. -> (status, headers, body).
+
+    voice: an optional per-request Kokoro voice id; empty falls back to the
+    KOKORO_VOICE env default (so the global setting still works on its own)."""
+    body = json.dumps({"model": "kokoro", "input": text, "voice": voice or VOICE,
                        "response_format": "pcm", "stream": False}).encode()
     req = (b"POST /v1/audio/speech HTTP/1.1\r\n"
            b"Host: " + U_HOST.encode() + b":" + str(U_PORT).encode() + b"\r\n"
@@ -158,11 +167,16 @@ class H(BaseHTTPRequestHandler):
             raw = self._read_request_body()
             body = json.loads(raw) if raw else {}
             text = body.get("input") or body.get("text") or ""
-            print(f"POST /v1/audio/speech in={len(text)} chars", flush=True)
+            voice = body.get("voice") or ""
+            if voice and not VOICE_ID_RE.fullmatch(voice):
+                print(f"POST /v1/audio/speech voice={voice!r} REJECTED (not a voice id)", flush=True)
+                self._send(400, json.dumps({"error": "voice must be a Kokoro voice id like af_heart"}).encode())
+                return
+            print(f"POST /v1/audio/speech in={len(text)} chars voice={voice or VOICE}", flush=True)
             if not text:
                 self._send(400, b'{"error":"no text"}')
                 return
-            status, headers, audio = call_upstream(text)
+            status, headers, audio = call_upstream(text, voice)
             if status != 200 or not _valid_pcm(audio):
                 print(f"  -> kokoro http={status} bytes={len(audio)} valid={_valid_pcm(audio)} "
                       f"ELAPSED={__import__('time').time()-t0:.2f}s  FAIL", flush=True)
