@@ -6,15 +6,10 @@
   Modified version of Pithagoras from the original author. Uses a custom avatar plugin that supports VRM models for interactive dialogue with local LLMs, and can display browser window side by side with the avatar, both controlled by the remote LLM. See /opt/pithagoras-build/deploy/remote-browser/README.md <br><br>
   This build is optimized for a 10GB VRAM video card or better, with excellent voice quality using Whisper for speech to text, Kokoro-82M with the af_heart voice for text to speech. All open source and fully local, no internet access required.  The local 8GB LLM can control the avatar with extremely low latency, nearly realtime response, and it is useful for demos, but you will have higher quality, albeit slower, results pointing to a second box running a hermes installation that uses something like Qwen 3.8:27b.
 <br><br>
-  A web front end for the <a href="https://github.com/earendil-works/pi">pi coding agent</a>, built to be
-  left alone.<br>
-  <strong>Give it a task, close the browser, come back later and read what it did.</strong>
+
 </p>
 
-<p align="center">
-  <a href="https://thecodacus.github.io/pithagoras/">Documentation</a> ·
-  <a href="https://thecodacus.github.io/pithagoras/guide/deploying">Deploying</a> ·
-  <a href="https://thecodacus.github.io/pithagoras/channels/writing-a-channel">Write a channel</a>
+
 </p>
 
 ---
