@@ -14,4 +14,8 @@ window.AVATAR_BACKGROUNDS.push(
   { id: "bg10", name: "Castle at Dusk", url: "backgrounds/background10.jpg" },
   { id: "bg11", name: "Alien Desert", url: "backgrounds/background11.jpg" },
   { id: "bg12", name: "Dragon's Hoard", url: "backgrounds/background12.jpg" },
+  // Animated background (GIF): `animated` marks it so the app renders it through a
+  // native <img> (which the browser animates) instead of the canvas, which would
+  // only ever draw the first frame.
+  { id: "bg5ani", name: "Recording Studio (animated)", url: "backgrounds/background5ani.gif", animated: true },
 );

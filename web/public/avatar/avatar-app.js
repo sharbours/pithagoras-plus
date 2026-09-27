@@ -1419,12 +1419,14 @@ $("#framing").onchange = e => { VrmAvatar.frame(e.target.value); store.set("fram
 $("#charSelect").onchange = e => selectCharacter(e.target.value);
 $("#loadBtn").onclick = () => $("#fileInput").click();
 $("#bgBtn").onclick = () => $("#bgInput").click();
-// The background is decoded and painted onto a canvas: no blob: or data: link is
-// involved, so viewers with strict security policies (e.g. file previews) can't block it.
-// It's either a shipped gallery image (remembered by id, re-fetched each load) or an
-// image the user uploaded (the file itself, kept in IndexedDB). Either way it's
-// remembered, so the embedded voice stage shows the same backdrop.
+// The background is either a still image, painted onto a canvas (no blob: or data:
+// link involved, so viewers with strict security policies can't block it), or an
+// animated GIF, shown through a native <img> — a canvas would only ever render the
+// first frame of an animation. It's either a shipped gallery image (remembered by
+// id, re-fetched each load) or an image the user uploaded (the file itself, kept in
+// IndexedDB). Either way it's remembered, so the embedded voice stage shows the same backdrop.
 let bgBitmap = null;
+let bgGifObjUrl = null;   // object URL backing an *uploaded* animated background
 const shippedBgs = (window.AVATAR_BACKGROUNDS || []).map(b => ({ ...b, kind: "shipped" }));
 function drawBg() {
   const c = $("#bgImage"); if (!bgBitmap) return;
@@ -1441,17 +1443,38 @@ async function decodeImage(f) {
   const url = await new Promise((res, rej) => { const rd = new FileReader(); rd.onload = () => res(rd.result); rd.onerror = rej; rd.readAsDataURL(f); });
   return await new Promise((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url; });
 }
+function showAnimatedBg(src) {
+  $("#bgImage").hidden = true;
+  const img = $("#bgGif");
+  img.hidden = false;
+  if (img.getAttribute("src") !== src) img.src = src;
+  $("#bgClear").hidden = false;
+}
 async function applyBackground(b) {
-  if (!b) { bgBitmap = null; $("#bgImage").hidden = true; $("#bgClear").hidden = true; store.set("background", null); idbSet("background", null); return; }
+  if (!b) {
+    bgBitmap = null; $("#bgImage").hidden = true; $("#bgGif").hidden = true;
+    if (bgGifObjUrl) { URL.revokeObjectURL(bgGifObjUrl); bgGifObjUrl = null; }
+    $("#bgClear").hidden = true; store.set("background", null); idbSet("background", null); return;
+  }
+  // Shipped entries can flag `animated`; an upload is animated when it's a GIF.
+  const animated = b.animated || (b.kind === "upload" && b.file && b.file.type === "image/gif");
   if (b.kind === "shipped") {
     const r = await fetch(b.url); if (!r.ok) throw new Error(`Couldn't load ${b.url} (${r.status}).`);
-    bgBitmap = await decodeImage(await r.blob());
+    if (animated) { showAnimatedBg(b.url); }
+    else { bgBitmap = await decodeImage(await r.blob()); $("#bgGif").hidden = true; }
     store.set("background", b.id); idbSet("background", null);
   } else {
-    bgBitmap = await decodeImage(b.file);
+    if (animated) {
+      bgGifObjUrl = URL.createObjectURL(b.file);
+      showAnimatedBg(bgGifObjUrl);
+    } else {
+      bgBitmap = await decodeImage(b.file);
+      $("#bgGif").hidden = true;
+    }
     idbSet("background", b.file); store.set("background", "upload");
   }
-  $("#bgImage").hidden = false; drawBg(); $("#bgClear").hidden = false;
+  if (!animated) { $("#bgImage").hidden = false; drawBg(); }
+  if (!animated) $("#bgClear").hidden = false;
   log(`Background: ${b.name}`);
 }
 $("#bgInput").onchange = async e => { const f = e.target.files[0]; e.target.value = ""; if (!f) return;
