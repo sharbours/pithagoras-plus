@@ -171,6 +171,23 @@ export function VoiceStage({ workPhase, canvasOpen, onCanvasMinimize, onCanvasTo
     }).catch(() => { if (!cancelled) setBrowserError('Could not connect to the browser viewer.'); });
     return () => { cancelled = true; };
   }, [browserActivity, onCue]);
+  // Browsing that leaves no tool events here (e.g. Hermes driving the browser from its own
+  // host) still opens the window: the server watches the browser itself for navigations.
+  useEffect(() => {
+    if (!browserAvailable) return;
+    let seen = -1, stopped = false;
+    const check = async () => {
+      try {
+        const { count } = await api.browserActivity();
+        if (stopped) return;
+        if (seen >= 0 && count > seen) { setBrowserError(''); setLoaded(true); setShown(true); onCue('focus'); }
+        seen = count;
+      } catch { /* the next check tries again */ }
+    };
+    void check();
+    const timer = setInterval(check, 2000);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [browserAvailable, onCue]);
   const open = () => { setLoaded(true); setShown(true); onCue('focus'); };
   const minimize = () => { setShown(false); end.current?.focus({ preventScroll: true }); };
   const input = !muted && phase === "Hearing you";

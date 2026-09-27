@@ -42,6 +42,7 @@ import { browserRouter } from "./api/browser.js";
 import { terminalRouter } from "./api/terminal.js";
 import { attachBrowserUpgrade, mountBrowserProxy } from "./browser-proxy.js";
 import { watchBrowserFrames } from "./extensions/browser-frames.js";
+import { watchBrowserActivity } from "./extensions/browser-activity.js";
 import { startLlamaProxy } from "./llama-progress.js";
 import { pinConnection } from "./api/browser.js";
 import { routineSupervisor } from "./routines/supervisor.js";
@@ -753,6 +754,7 @@ const server = (tls ? createHttpsServer(tls, app) : createHttpServer(app)).liste
 attachBrowserUpgrade(server);
 // Keeps the agent's browser rendering when nobody has the panel open.
 watchBrowserFrames();
+watchBrowserActivity();
 // Reports how far llama.cpp has got through a prompt, which is otherwise a
 // silent minute or two before the first token.
 startLlamaProxy((sessionId, prefill) => sessions.reportPrefill(sessionId, prefill));

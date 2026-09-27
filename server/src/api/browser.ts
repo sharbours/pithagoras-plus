@@ -2,6 +2,7 @@ import express, { type Router } from "express";
 import { browserAllowlist, getDb, setBrowserAllowlist, type SessionRow } from "../db.js";
 import { readMcpFile, writeMcpFile } from "./mcp.js";
 import * as service from "../extensions/browser-service.js";
+import { browserActivity } from "../extensions/browser-activity.js";
 
 /**
  * The agent's browser: whether it is up, who may drive it, and where to.
@@ -230,6 +231,9 @@ export function browserRouter(): Router {
     const saved = service.saveConfig({ user, password, port, httpsPort });
     res.json({ user: saved.user, hasPassword: Boolean(saved.password) });
   });
+
+  // Navigations seen in the browser itself, whoever drove them (see browser-activity.ts).
+  router.get("/browser/activity", (_req, res) => { res.json(browserActivity()); });
 
   router.get("/browser/suggest-password", (_req, res) => {
     res.json({ password: service.suggestPassword() });

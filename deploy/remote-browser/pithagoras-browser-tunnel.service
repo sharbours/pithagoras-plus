@@ -1,0 +1,29 @@
+# /etc/systemd/system/pithagoras-browser-tunnel.service   (on the portal host, .210)
+#
+# Makes a browser that runs on the Hermes host (.197) look local to the portal:
+# the viewer (3011), the stream the portal keeps watching so the browser keeps rendering (8082),
+# and the debugging port the portal checks for status and navigations (9222) are forwarded to the
+# same ports on .210's loopback. Nothing on .197 needs to be reachable except SSH.
+#
+# Needs: a key-only SSH login from .210 to .197 (see README.md); no browser container running on
+# .210 itself (the ports would collide — ExitOnForwardFailure makes that fail loudly).
+[Unit]
+Description=SSH tunnel to the Hermes-host browser for Pithagoras
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pithagoras
+ExecStart=/usr/bin/ssh -N -T \
+  -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+  -o BatchMode=yes -o StrictHostKeyChecking=accept-new \
+  -i /home/pithagoras/.ssh/browser_tunnel \
+  -L 127.0.0.1:9222:127.0.0.1:9222 \
+  -L 127.0.0.1:8082:127.0.0.1:8082 \
+  -L 127.0.0.1:3011:127.0.0.1:3011 \
+  tunnel@192.168.0.197
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

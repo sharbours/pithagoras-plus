@@ -284,6 +284,7 @@ export const api = {
 
   people: () => json<{ people: Person[] }>("/api/people"),
   browser: () => json<BrowserStatus>("/api/browser"),
+  browserActivity: () => json<{ count: number; at: number; url: string }>("/api/browser/activity"),
   openTerminal: (sessionId?: string) =>
     json<{ id: string; cwd: string }>("/api/terminal", {
       method: "POST",
