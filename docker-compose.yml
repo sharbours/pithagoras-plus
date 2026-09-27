@@ -53,6 +53,19 @@ services:
       LLAMA_DISK_CACHE_MODELS: ${LLAMA_DISK_CACHE_MODELS:-}
       LLAMA_BASE_URL: ${LLAMA_BASE_URL:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # The agent's browser lives on the Hermes host (.197) and reaches the
+      # portal through the SSH tunnel (pithagoras-browser-tunnel.service):
+      # CDP 9222 / stream 8082 / viewer 3011 all on .210's loopback.
+      # BROWSER_EXTERNAL keeps the portal from installing its own browser
+      # (same ports would collide); the user/password/port match the container
+      # on .197 so the portal's /browser-ui proxy can log in.
+      BROWSER_EXTERNAL: ${BROWSER_EXTERNAL:-}
+      BROWSER_CDP_URL: ${BROWSER_CDP_URL:-}
+      BROWSER_USER: ${BROWSER_USER:-}
+      BROWSER_PASSWORD: ${BROWSER_PASSWORD:-}
+      BROWSER_PORT: ${BROWSER_PORT:-3010}
+      BROWSER_HTTPS_PORT: ${BROWSER_HTTPS_PORT:-3011}
+      BROWSER_STREAM_PORT: ${BROWSER_STREAM_PORT:-8082}
 
 volumes:
   portal-data:
