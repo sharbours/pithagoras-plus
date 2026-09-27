@@ -21,6 +21,8 @@ window.AVATAR_CHARACTERS.push(
   { id: "model28", name: "Model 28", url: "characters/Model28.vrm" },
   { id: "orochix", name: "Orochi X", url: "characters/OrochiX.vrm" },
   { id: "shadow", name: "Shadow", url: "characters/Shadow.vrm" },
+  { id: "techno-elf", name: "Techno-Elf", url: "characters/Techno-Elf.vrm",
+    credit: "Techno-Elf by Sean Harbour, VRoid Studio 2.14" },
   { id: "thorn", name: "Thorn", url: "characters/Thorn.vrm" },
   { id: "violet", name: "Violet", url: "characters/Violet.vrm" },
 );
