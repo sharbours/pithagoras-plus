@@ -881,6 +881,8 @@ const VrmAvatar = (() => {
      a 3D character is actually requested. */
   let L = null, THREE;
   let renderer, scene, camera, lookTarget, vrm = null, isV0 = false, hipsY = 0, headY = 1.4, hipsRest = null;
+  let geomTop = 1.65; // world-space Y of the top of the model's geometry (top of hair); fitted per load
+  let geomBottom = 0; // world-space Y of the bottom of the model's geometry (feet); fitted per load
   let baseQ, flipQ, spinQ, tmpV, tmpV2, AXIS_X, AXIS_Y;
   let lights = [], brightness = .7;
   function setBrightness(k) { brightness = k; for (const [l, base] of lights) l.intensity = Math.PI * base * k; }
@@ -1092,6 +1094,12 @@ const VrmAvatar = (() => {
           kneeR = .05 * hipHeight / .85; }
         const head = v.humanoid.getRawBoneNode("head");
         const hp = new THREE.Vector3(); if (head) head.getWorldPosition(hp); headY = hp.y || 1.4;
+        // top/bottom of the model's actual geometry (top of hair / feet) in world space —
+        // used to fit the camera so no part of the avatar is clipped out of the frame
+        v.scene.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(v.scene);
+        geomTop = Math.max(headY + .12, bb.max.y);   // sanity-clamp against a degenerate box
+        geomBottom = Math.min(0, bb.min.y);
         frame();
         resolve(v);
       }, err => { restore(); lastLoad = { failed, texErrors, fatal: (err && err.message) || String(err) };
@@ -1102,8 +1110,24 @@ const VrmAvatar = (() => {
   function frame(f) {
     if (f) framing = f;
     if (!camera) return;
-    const cfg = { face: [headY + .03, .72], bust: [headY - .16, 1.5], full: [headY * .56, headY * 2.85] }[framing];
-    camera.position.set(0, cfg[0], cfg[1]); camera.lookAt(0, cfg[0], 0);
+    const half = Math.tan((camera.fov * Math.PI) / 180 / 2); // vertical half-FOV (radians)
+    let cy, z;
+    if (framing === "full") {
+      // fit the whole body: center on the geometry box, size the view to the box
+      // height (feet to top of hair) — the box need not be symmetric about its
+      // center, so fit the full extent rather than only the top
+      cy = (geomTop + geomBottom) / 2;
+      const hh = Math.max(.25, (geomTop - geomBottom) / 2); // box half-height (floored)
+      z = (hh + .02) / half;
+    } else {
+      // face/bust: head-anchored center stays; pull back until the top of the
+      // hair fits. The camera looks horizontal from cy, so the view top is
+      // cy + z*half — without this the fixed distance clipped tall hair crests.
+      cy = ({ face: headY + .03, bust: headY - .16 })[framing] || headY;
+      const base = ({ face: .72, bust: 1.5 })[framing] || 1.5;
+      z = Math.min(base * 6, Math.max(base, (geomTop - cy) / half + .02));
+    }
+    camera.position.set(0, cy, z); camera.lookAt(0, cy, 0);
   }
 
   function apply(dt) {
