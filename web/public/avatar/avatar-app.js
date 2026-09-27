@@ -584,7 +584,7 @@ window.avatar = {
   setEmotion: (e, i, h) => setEmotion(e, i, h),
   on: (name, fn) => ((listeners[name] ||= []).push(fn)),
   get state() { return { mode: S.mode, emotion: S.target.emotion, speaking: S.speaking, character: currentChar && currentChar.id }; },
-  emotions: EMOTIONS, gestures: Object.keys(GESTURES), poses: Object.keys(KARATE), setPose, _dur: n => GESTURES[n] ? GESTURES[n].dur : 0, _HP: HP, _vrm: () => VrmAvatar.vrm,
+  emotions: EMOTIONS, gestures: Object.keys(GESTURES), poses: Object.keys(KARATE), setPose, setBrightness: k => { VrmAvatar.setBrightness(k); }, _dur: n => GESTURES[n] ? GESTURES[n].dur : 0, _HP: HP, _vrm: () => VrmAvatar.vrm,
 };
 // Same-origin only: the embedded frame lives on the portal's origin, and the
 // standalone page is opened on the same origin. file:// has origin "null" —
@@ -882,6 +882,8 @@ const VrmAvatar = (() => {
   let L = null, THREE;
   let renderer, scene, camera, lookTarget, vrm = null, isV0 = false, hipsY = 0, headY = 1.4, hipsRest = null;
   let baseQ, flipQ, spinQ, tmpV, tmpV2, AXIS_X, AXIS_Y;
+  let lights = [], brightness = .7;
+  function setBrightness(k) { brightness = k; for (const [l, base] of lights) l.intensity = Math.PI * base * k; }
   /* Spin physics. VRoid hair is tuned stiff and damped, and some models anchor their springs to a
      node that turns with the body, so a spin in place barely moves the hair. While spinning we add a
      centrifugal push (outward from the rotation axis) plus a push along the direction of rotation to every spring joint, loosen
@@ -961,9 +963,12 @@ const VrmAvatar = (() => {
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     scene = new THREE.Scene();
     camera = new THREE.PerspectiveCamera(28, 1, .05, 30);
-    const key = new THREE.DirectionalLight(0xffffff, Math.PI * .85); key.position.set(1, 1.6, 2.2); scene.add(key);
-    const rim = new THREE.DirectionalLight(0xffd6ea, Math.PI * .35); rim.position.set(-1.5, 1.2, -1.5); scene.add(rim);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x9a8cc8, Math.PI * .45));
+    // Base intensities; the Lighting slider scales all three. Pale VRoid skin clips to white if
+    // the total is too bright, so the default is kept below full.
+    lights = [[new THREE.DirectionalLight(0xffffff, 1), .85], [new THREE.DirectionalLight(0xffd6ea, 1), .35], [new THREE.HemisphereLight(0xffffff, 0x9a8cc8, 1), .45]];
+    lights[0][0].position.set(1, 1.6, 2.2); lights[1][0].position.set(-1.5, 1.2, -1.5);
+    for (const [l] of lights) scene.add(l);
+    setBrightness(brightness);
     lookTarget = new THREE.Object3D(); scene.add(lookTarget);
     new ResizeObserver(resize).observe($("#stage"));
     resize();
@@ -1176,7 +1181,7 @@ const VrmAvatar = (() => {
     ready: () => !!renderer,   // true once the WebGL renderer exists (3D usable)
     fps: () => { if (fpsSamples.length < 30) return null; const s = fpsSamples.reduce((a, b) => a + b, 0); return s / fpsSamples.length; },  // avg ms per frame
     findExpression: n => { if (!vrm) return null; const l = String(n).toLowerCase(); return (vrm.expressionManager.expressions.find(e => e.expressionName.toLowerCase() === l) || {}).expressionName || null; },
-    customNames: () => customNames.slice(), show(v) { canvas.hidden = !v; canvas.style.opacity = "1"; if (v) resize(); } };
+    customNames: () => customNames.slice(), setBrightness, show(v) { canvas.hidden = !v; canvas.style.opacity = "1"; if (v) resize(); } };
 })();
 
 /* ---------------------------------------------------------------- characters */
@@ -1418,6 +1423,9 @@ $("#wsBtn").onclick = toggleWs;
 $("#framing").onchange = e => { VrmAvatar.frame(e.target.value); store.set("framing", e.target.value); };
 $("#charSelect").onchange = e => selectCharacter(e.target.value);
 $("#loadBtn").onclick = () => $("#fileInput").click();
+{ const saved = parseFloat(store.get("brightness")); const k = saved > 0 ? saved : .7;
+  $("#bright").value = Math.round(k * 100); VrmAvatar.setBrightness(k);
+  $("#bright").oninput = e => { const v = +e.target.value / 100; VrmAvatar.setBrightness(v); store.set("brightness", String(v)); }; }
 $("#bgBtn").onclick = () => $("#bgInput").click();
 // The background is either a still image, painted onto a canvas (no blob: or data:
 // link involved, so viewers with strict security policies can't block it), or an
