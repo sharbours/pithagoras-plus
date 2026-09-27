@@ -7,6 +7,8 @@ window.AVATAR_CHARACTERS.push(
     credit: "Seed-san by VirtualCast, Inc. Used under the VRM Public License 1.0 (vrm.dev/licenses/1.0)" },
   { id: "avatar-sample-b", name: "AvatarSample_B (complex)", url: "characters/avatar-sample-b.vrm",
     credit: "AvatarSample_B by pixiv Inc. (VRoid Project), VRM Public License 1.0" },
+  { id: "atomic-age-robot", name: "Atomic Age Robot", url: "characters/Atomic-Age-Robot.vrm",
+    credit: "Atomic Age Robot — procedural VRM (Avatar Lab)" },
   { id: "batman", name: "Batman", url: "characters/Batman.vrm" },
   { id: "cyberjt", name: "Cyber J.T.", url: "characters/CyberJT.vrm" },
   { id: "deadpool", name: "Deadpool", url: "characters/Deadpool.vrm" },
