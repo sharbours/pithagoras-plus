@@ -17,6 +17,8 @@ window.AVATAR_CHARACTERS.push(
   { id: "demongirl", name: "Demon Girl", url: "characters/DemonGirl.vrm" },
   { id: "emerald", name: "Emerald", url: "characters/Emerald.vrm" },
   { id: "ganondorf", name: "Ganondorf", url: "characters/Ganondorf.vrm" },
+  { id: "green-martian-warrior", name: "Green Martian Warrior", url: "characters/Green-Martian-Warrior.vrm",
+    credit: "Green Martian Warrior — VRM 1.0 (Avatar Lab)" },
   { id: "grove-walker-tree", name: "Grove-Walker Tree", url: "characters/Grove-Walker-Tree.vrm",
     credit: "Grove-Walker Tree — procedural VRM (Avatar Lab)" },
   { id: "halcyon-android", name: "Halcyon Android", url: "characters/Halcyon-Android.vrm",
