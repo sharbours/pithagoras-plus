@@ -10,7 +10,7 @@
 const EMOTIONS = "neutral happy sad angry surprised relaxed thinking sleepy shy smirk pout squint shocked";
 const GESTURES = "nod shake tilt bounce wave bow shrug clap point think scratch cheer dance jump facepalm crossarms hips giggle stretch lookaround sigh wink lookup lookdown lookleft lookright backflip spin thumbsup peace ok fist openpalm fingerguns horns hearthands pirouette armwave disco raisetheroof groove";
 const KNOWN = new Set(`${EMOTIONS} ${GESTURES}`.split(" "));
-const PREFIXED = new Set(["pose", "expr"]);          // [pose:horse], [expr:HeartEyes:0.6]
+const PREFIXED = new Set(["pose", "expr", "exercise"]);   // [pose:horse], [expr:HeartEyes:0.6], [exercise:deep_squat:3]
 const TAG = /\[([a-z]+)(?::([^\]\s:]{1,40}))?(?::([0-9.]+))?\]/gi;
 
 const isTag = (name: string, value?: string) => PREFIXED.has(name.toLowerCase()) ? !!value : KNOWN.has(name.toLowerCase());
