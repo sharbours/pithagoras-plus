@@ -540,7 +540,78 @@ function setKokoroVoice(v) {
   if (!currentChar) return;
   store.set(kokoroVoiceKey(currentChar.id), v || KOKORO_DEFAULT);
   syncKokoroVoice();
+  // Tell the running voice app right away — it otherwise only re-reads the
+  // voice when the character is picked again, so a change made mid-session
+  // would not take effect until a character switch.
+  if (window.parent !== window) window.parent.postMessage({ avatarEvent: "kokoroVoice", character: currentChar.id, voice: KOKORO_VOICE() }, "*");
+  try { bc && bc.postMessage({ avatarEvent: "kokoroVoice", character: currentChar.id, voice: KOKORO_VOICE() }); } catch {}
 }
+/* Hear this character's Kokoro voice from the page: fetch a short line through
+   the portal's TTS (same path voice mode uses — /api/voice/preview, which takes
+   the voice id and returns 24 kHz PCM as WAV) and play it with live lip sync.
+   The browser's Web Speech (the "Browser voice" control) never goes through
+   Kokoro, so a selector change is only audible here through this button or in
+   the voice stage itself. */
+async function testKokoroVoice() {
+  const btn = $("#testKokoroBtn");
+  if (!currentChar) return;
+  if (btn) { btn.disabled = true; btn.textContent = "Speaking…"; }
+  stopSpeech();
+  const token = speechToken;
+  const text = "Hi, this is how I sound with this voice.";
+  showSubtitle(text);
+  let audio = null, ctx = null, src = null, an = null, raf = 0;
+  const stop = () => {
+    if (src) { try { src.onended = null; src.stop(); } catch {} }
+    if (an) { cancelAnimationFrame(raf); an = null; }
+    if (ctx) { try { ctx.close(); } catch {} ctx = null; }
+    if (token !== speechToken) return;
+    S.speaking = false; hideSubtitle(); updateTalkBadge();
+    S.holdUntil = Math.min(S.holdUntil, now() + 2200);
+    if (btn) { btn.disabled = false; btn.textContent = "Test Kokoro voice"; }
+  };
+  try {
+    const req = () => fetch("/api/voice/preview", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice: KOKORO_VOICE() }) });
+    let res = await req();
+    // /api is password-gated but /avatar/ is public: if this device isn't
+    // logged into the portal yet, ask once for the password and retry.
+    if (res.status === 401) {
+      const pw = prompt("This preview speaks through the portal's TTS, which needs your portal login. Enter the portal password:");
+      if (!pw) throw new Error("No portal login — the voice is saved, but this test needs one.");
+      const login = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
+      if (!login.ok) throw new Error((await login.json().catch(() => ({}))).error || "Login failed");
+      res = await req();
+    }
+    if (token !== speechToken) return;
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.error || `Preview returned HTTP ${res.status}`); }
+    const wav = new Uint8Array(await res.arrayBuffer());
+    ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = await ctx.decodeAudioData(wav.buffer.slice(0));
+    src = ctx.createBufferSource(); src.buffer = buf; src.connect(ctx.destination);
+    // Lip sync: RMS of what's actually playing, through the existing extMouth
+    // path (the same one the voice stage uses for real speech).
+    an = ctx.createAnalyser(); an.fftSize = 1024; src.connect(an);
+    const ab = new Float32Array(an.fftSize);
+    setTalking(true);
+    src.onended = () => stop();
+    src.start();
+    const tick = () => {
+      if (!an) return;
+      an.getFloatTimeDomainData(ab);
+      let s = 0; for (let i = 0; i < ab.length; i++) s += ab[i] * ab[i];
+      const rms = Math.sqrt(s / ab.length);
+      S.extMouth = clamp((rms - 0.008) * 6, 0, 1); S.extMouthT = now();
+      if (token === speechToken) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    log(`Kokoro test: ${KOKORO_VOICE()} (${currentChar.name})`);
+  } catch (e) {
+    if (token === speechToken) log(`Kokoro test failed: ${e.message}`);
+    stop();
+  }
+}
+function setTalking(v) { S.speaking = v; updateTalkBadge(); }
 function syncKokoroVoice() {
   const sv = $("#kokoroVoice"), pv = $("#pickVoice");
   if (sv) sv.value = KOKORO_VOICE();
@@ -1592,6 +1663,8 @@ function fillKokoroVoices() {
 fillKokoroVoices();
 if ($("#kokoroVoice")) $("#kokoroVoice").onchange = e => setKokoroVoice(e.target.value);
 if ($("#pickVoice")) $("#pickVoice").onchange = e => setKokoroVoice(e.target.value);
+if ($("#testKokoroBtn")) $("#testKokoroBtn").onclick = () => testKokoroVoice();
+if ($("#pickTestVoice")) $("#pickTestVoice").onclick = () => testKokoroVoice();
 
 /* ---------------------------------------------------------------- in-stage picker
    In the embedded (voice-stage) view the full page chrome is hidden, so the

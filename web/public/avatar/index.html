@@ -200,6 +200,7 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
           <label>Background <select id="pickBg"></select></label>
           <label>Speaking voice <select id="pickVoice" aria-label="Speaking voice (Kokoro)"></select></label>
           <div class="picker-actions">
+            <button class="btn" id="pickTestVoice" title="Hear this character’s Kokoro voice (plays a short line through the portal’s TTS)">Test voice</button>
             <button class="btn" id="pickUploadBg">Upload image…</button>
             <button class="btn" id="pickClose">Done</button>
           </div>
@@ -263,8 +264,9 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
         </div>
         <div class="row">
           <label>Speaking voice <select id="kokoroVoice" aria-label="Speaking voice (Kokoro)" style="max-width:190px"></select></label>
+          <button class="btn" id="testKokoroBtn" title="Plays a short line through the portal's Kokoro TTS — the same voice this character gets in voice mode. The “Browser voice” test above never uses Kokoro.">Test Kokoro voice</button>
         </div>
-        <p class="hint" style="margin-top:0">“Speaking voice” is the Kokoro voice the portal’s TTS uses when this character talks in voice mode. It is remembered per character, so the choice sticks every time this avatar is picked. “Browser voice” only affects this page’s own demo speech.</p>
+        <p class="hint" style="margin-top:0">“Speaking voice” is the Kokoro voice the portal’s TTS uses when this character talks in voice mode. It is remembered per character, so the choice sticks every time this avatar is picked. “Browser voice” only affects this page’s own demo speech — press “Test Kokoro voice” to actually hear the Kokoro voice (it needs your portal login the first time).</p>
         <div class="row">
           <label>Rate <input type="range" id="rate" min="0.6" max="1.6" step="0.05" value="1"></label>
           <label>Pitch <input type="range" id="pitch" min="0.5" max="2" step="0.05" value="1.15"></label>

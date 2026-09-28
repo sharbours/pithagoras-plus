@@ -180,6 +180,42 @@ export function voiceRouter(): Router {
       res.json(saved);
     } catch (e) { res.status(400).json({ error: (e as Error).message }); }
   });
+  // Hear a voice without entering voice mode: the Avatar Lab page uses this to
+  // preview a per-character Kokoro voice (a short line, same TTS path voice mode
+  // uses). Auth-gated like the rest of /api; the portal's own login cookie is
+  // enough, so the same-origin /avatar/ page can call it.
+  router.post("/voice/preview", async (req, res) => {
+    const settings = config();
+    if (!settings.enabled) return res.status(409).json({ error: "Enable Voice in Settings → Add-ons first" });
+    if (settings.runtime !== "audio-cpp") return res.status(501).json({ error: "Voice preview needs the Kokoro (audio-cpp) runtime" });
+    let text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    if (!text) text = "Hi, this is how I sound with this voice.";
+    if (text.length > 300) return res.status(400).json({ error: "Preview text must be 300 characters or fewer" });
+    const voice = typeof req.body?.voice === "string" && /^[a-zA-Z0-9_-]{1,32}$/.test(req.body.voice) ? req.body.voice : "";
+    const controller = new AbortController();
+    res.on("close", () => controller.abort());
+    try {
+      if (managedVoice()) await leases.acquire("preview");
+      try {
+        const json: Record<string, unknown> = { model: "breeze", input: text, stream: false, response_format: "pcm" };
+        if (voice) json.voice = voice;   // the adapter ignores this for non-Kokoro upstreams
+        const upstream = await fetch(settings.breezeUrl, { method: "POST", body: JSON.stringify(json),
+          headers: { "Content-Type": "application/json" }, redirect: "error", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(120000)]) });
+        if (!upstream.ok) throw new Error(`Speech generation returned HTTP ${upstream.status}`);
+        const buf = Buffer.from(await upstream.arrayBuffer());
+        if (Number(upstream.headers.get("x-sample-rate") || 24000) !== 24000 || !buf.length || buf.length % 2)
+          throw new Error("Speech generation returned invalid PCM audio");
+        res.set({ "Content-Type": "audio/wav", "Cache-Control": "no-store" }).send(pcmWav(buf));
+      } finally {
+        if (managedVoice()) await leases.release("preview", config().lazyLoad !== false);
+      }
+    } catch (e) {
+      if (!res.destroyed) {
+        if (res.headersSent) res.destroy(e as Error);
+        else res.status(502).json({ error: (e as Error).message });
+      }
+    }
+  });
   router.use("/sessions/:id/voice", (req, res, next) => {
     if (!config().enabled) return res.status(409).json({ error: "Enable Voice in Settings → Add-ons first" });
     if (!getDb().prepare("SELECT id FROM sessions WHERE id = ?").get(req.params.id))
