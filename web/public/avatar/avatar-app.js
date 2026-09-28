@@ -42,17 +42,22 @@ function applyPos() {
 // character layer (both the 2D SVG and the 3D canvas carry the same CSS transform, so
 // they stay in sync). The gear picker (present on the standalone page AND in the voice
 // stage) is the only control, so it works wherever the avatar is embedded.
+// Per-character: persist this character's horizontal position under posKey(id) so
+// each avatar keeps its own (see the per-character pose block below).
 function setPos(frac) {
   posFrac = clamp(frac, 0, 1);
-  store.set("position", String(Math.round(posFrac * 100)));
+  const id = currentChar && currentChar.id;
+  if (id) store.set(posKey(id), String(Math.round(posFrac * 100)));
   applyPos();
   const sel = $("#pickPos"); if (sel) sel.value = Math.round(posFrac * 100);
 }
 // Character-size slider: 50-100% of the default. Same persistence pattern as position —
 // the gear picker is the single control, on the standalone page and in the voice stage.
+// Per-character: persist this character's size under scaleKey(id).
 function setScale(pct) {
   charScale = clamp(pct, 50, 100) / 100;
-  store.set("scale", String(Math.round(charScale * 100)));
+  const id = currentChar && currentChar.id;
+  if (id) store.set(scaleKey(id), String(Math.round(charScale * 100)));
   applyPos();
   const sel = $("#pickScale"); if (sel) sel.value = Math.round(charScale * 100);
   const val = $("#pickScaleVal"); if (val) val.textContent = Math.round(charScale * 100) + "%";
@@ -594,6 +599,68 @@ function syncPickBg() {
   for (const b of shippedBgs) mk(b.id, b.name);
   if (s === "upload") mk("upload", "Uploaded image");
   pb.value = s || "";
+}
+
+/* ---------------------------------------------------------------- framing / position / size (per character)
+   These three were once a single global choice shared by every character.
+   Now each character keeps its own framing (face/bust/full), horizontal
+   position and size in localStorage under posKey/scaleKey/framingKey — the
+   same pattern as background (bgKey) and the Kokoro voice (kokoroVoiceKey) —
+   so an avatar remembers its own values when picked again, without leaking
+   into the others. The legacy global "position"/"scale"/"framing" keys are
+   carried over once into the restored character (migrateLegacyPose) and then
+   unused. posFrac/charScale always hold the CURRENT character's values, so
+   applyPos() and both headScreen() callers are unchanged. */
+function posKey(id) { return "avatarLab.pos." + id; }
+function scaleKey(id) { return "avatarLab.scale." + id; }
+function framingKey(id) { return "avatarLab.framing." + id; }
+function currentFraming() {
+  const id = currentChar && currentChar.id;
+  return (id ? store.get(framingKey(id)) : null) || "bust";
+}
+/* Load this character's own position/size into the live posFrac/charScale.
+   Defaults: centered + full; left-justified (0.2) in the voice stage (embed)
+   so the right side stays open — unless the character has saved values. */
+function loadCharPose(id) {
+  id = id || (currentChar && currentChar.id);
+  if (!id) return;
+  const p = store.get(posKey(id));
+  posFrac = p != null ? clamp(+p / 100, 0, 1) : (EMBED ? 0.2 : 0.5);
+  const s = store.get(scaleKey(id));
+  charScale = s != null ? clamp(+s, 50, 100) / 100 : 1;
+}
+/* Persist this character's framing choice and update both the standalone
+   (#framing) and in-stage (#pickFraming) controls. */
+function setFraming(v) {
+  const id = currentChar && currentChar.id;
+  if (id) store.set(framingKey(id), v);
+  if ($("#framing")) $("#framing").value = v;
+  const pf = $("#pickFraming"); if (pf) pf.value = v;
+  VrmAvatar.frame(v);
+}
+/* Mirror the current posFrac/charScale/framing into the picker controls so the
+   picker always shows the CURRENT character's values (called from
+   selectCharacter after loadCharPose). */
+function syncPickPose() {
+  const pp = $("#pickPos"), ps = $("#pickScale");
+  if (pp) pp.value = Math.round(posFrac * 100);
+  if (ps) { ps.value = Math.round(charScale * 100); const sv = $("#pickScaleVal"); if (sv) sv.textContent = Math.round(charScale * 100) + "%"; }
+  const f = currentFraming();
+  if ($("#framing")) $("#framing").value = f;
+  const pf = $("#pickFraming"); if (pf) pf.value = f;
+}
+/* One-time carry-over: move the legacy single-global position/scale/framing
+   (pre-per-character) into the per-character keys of the character being
+   restored (only if it has none yet), then clear the globals so other avatars
+   start clean. Mirrors migrateLegacyBg. */
+function migrateLegacyPose(id) {
+  if (store.get("poseMigrated")) return;
+  store.set("poseMigrated", "1");
+  const p = store.get("position"), s = store.get("scale"), f = store.get("framing");
+  if (p != null && store.get(posKey(id)) == null) store.set(posKey(id), p);
+  if (s != null && store.get(scaleKey(id)) == null) store.set(scaleKey(id), s);
+  if (f && store.get(framingKey(id)) == null) store.set(framingKey(id), f);
+  store.set("position", null); store.set("scale", null); store.set("framing", null);
 }
 
 /* ---------------------------------------------------------------- Kokoro voice (per character)
@@ -1465,8 +1532,12 @@ async function selectCharacter(id) {
     currentChar = c;
     store.set("character", c.id);
     syncKokoroVoice();
+    loadCharPose(c.id);             // this character's own position/size -> posFrac/charScale
+    applyPos();
+    if (c.kind !== "svg") VrmAvatar.frame(currentFraming());   // this character's own framing
     await applyCharacterBg(c.id);   // this character shows its own remembered backdrop
     syncPickBg();                   // keep the in-stage picker's Background <select> in step
+    syncPickPose();                 // mirror framing/position/size into the picker controls
     if (c.file) idbSet("characterFile", c.file);
     const m = c.kind === "vrm" && VrmAvatar.meta();
     $("#credit").textContent = c.credit || (m ? `${m.name || m.title || c.name}${m.authors ? " by " + m.authors.join(", ") : m.author ? " by " + m.author : ""}` : "");
@@ -1627,7 +1698,7 @@ $("#copyCheck").onclick = async () => {
   setTimeout(() => { $("#copyCheck").textContent = "Copy report"; }, 2000);
 };
 $("#wsBtn").onclick = toggleWs;
-$("#framing").onchange = e => { VrmAvatar.frame(e.target.value); store.set("framing", e.target.value); };
+$("#framing").onchange = e => setFraming(e.target.value);
 $("#charSelect").onchange = e => selectCharacter(e.target.value);
 $("#loadBtn").onclick = () => $("#fileInput").click();
 { const saved = parseFloat(store.get("brightness")); const k = saved > 0 ? saved : .7;
@@ -1768,16 +1839,22 @@ if ($("#pickTestVoice")) $("#pickTestVoice").onclick = () => testKokoroVoice();
     if (s === "upload") mk("upload", "Uploaded image");
     pb.value = s || "";
   };
-  if (pf) pf.value = store.get("framing") || "bust";
-  // Position: left-justified by default in the voice stage (embed) so the right side
-  // stays open for future features; centered on the standalone page. User choice wins.
-  const savedPos = store.get("position");
-  if (savedPos != null) posFrac = clamp(+savedPos / 100, 0, 1);
-  else if (EMBED) posFrac = 0.2;
+  // Initial picker values: the RESTORED (saved) character's own framing/position/size.
+  // No character is loaded yet at this point, so read that character's per-character
+  // keys; when one doesn't exist yet (first visit since these went per-character) fall
+  // back to the legacy global before migrateLegacyPose moves it; else the defaults
+  // (left-justified in the voice stage, centered standalone; full size). selectCharacter
+  // re-applies the final values through syncPickPose() as soon as it loads.
+  const savedId = store.get("character");
+  if (pf) pf.value = (savedId && store.get(framingKey(savedId))) || store.get("framing") || "bust";
+  const savedPos = savedId ? store.get(posKey(savedId)) : null;
+  posFrac = savedPos != null ? clamp(+savedPos / 100, 0, 1)
+    : (store.get("position") != null ? clamp(+store.get("position") / 100, 0, 1)
+    : (EMBED ? 0.2 : 0.5));
   if (pp) pp.value = Math.round(posFrac * 100);
-  // Character size: full (100%) by default; a saved choice wins.
-  const savedScale = store.get("scale");
-  if (savedScale != null) charScale = clamp(+savedScale, 50, 100) / 100;
+  const savedScale = savedId ? store.get(scaleKey(savedId)) : null;
+  charScale = savedScale != null ? clamp(+savedScale, 50, 100) / 100
+    : (store.get("scale") != null ? clamp(+store.get("scale"), 50, 100) / 100 : 1);
   if (ps) { ps.value = Math.round(charScale * 100); const sv = $("#pickScaleVal"); if (sv) sv.textContent = Math.round(charScale * 100) + "%"; }
   applyPos();
   syncChar(); syncBgs();
@@ -1785,7 +1862,7 @@ if ($("#pickTestVoice")) $("#pickTestVoice").onclick = () => testKokoroVoice();
   $("#pickerToggle").onclick = () => $("#pickerBody").hidden = !$("#pickerBody").hidden;
   $("#pickClose").onclick = () => $("#pickerBody").hidden = true;
   pc.onchange = () => selectCharacter(pc.value);
-  pf.onchange = () => { $("#framing").value = pf.value; VrmAvatar.frame(pf.value); store.set("framing", pf.value); };
+  pf.onchange = () => setFraming(pf.value);
   if (pp) pp.oninput = () => setPos(pp.value / 100);
   if (ps) ps.oninput = () => setScale(+ps.value);
   pb.onchange = () => {
@@ -1853,7 +1930,7 @@ function resize() {
   if (EMBED) {
     const w = $("#stage").clientWidth;
     const want = w < 160;
-    if (want !== autoFace) { autoFace = want; if (want) VrmAvatar.frame("face"); else if (store.get("framing")) VrmAvatar.frame(store.get("framing")); }
+    if (want !== autoFace) { autoFace = want; if (want) VrmAvatar.frame("face"); else { const f = currentFraming(); if (f) VrmAvatar.frame(f); } }
   }
 }
 new ResizeObserver(resize).observe($("#stage"));
@@ -1881,36 +1958,28 @@ fillCharSelect();
 // Restore the last character, framing and background (set in the full page or in
 // the in-stage picker, reused when embedded).
 (async () => {
-  const saved = store.get("character"), framing = store.get("framing");
-  // Position: honor a saved value (initPicker already defaulted it — left in the voice
-  // stage, center on the standalone page — when it ran). The CSS shift applies to both
-  // the 2D and 3D character layer, so it works before the 3D stack finishes loading.
-  const p0 = store.get("position");
-  if (p0 != null) posFrac = clamp(+p0 / 100, 0, 1);
-  // Character size: honor a saved choice (full by default) so the restored character
-  // is the size the user last picked — matches what initPicker set on the picker.
-  const s0 = store.get("scale");
-  if (s0 != null) charScale = clamp(+s0, 50, 100) / 100;
-  applyPos();
-  if (framing) { $("#framing").value = framing; VrmAvatar.frame(framing); }
-  // If 3D is known-broken on this device (no WebGL, or it ran too slow), restore
-  // the 2D character instead of re-failing. Picking a 3D one again retries it.
+  const saved = store.get("character");
   const want = saved && chars.some(c => c.id === saved) ? saved : "mochi";
-  // Backgrounds are per-character now. Carry any single global background that
-  // predates that over into the character about to be restored (one time), so
-  // an existing setup keeps showing what it chose and other avatars start clean.
+  // Per-character pose (framing/position/size) AND background are both carried over
+  // from the legacy single-global era into the character about to be restored (one
+  // time each), so an existing setup keeps its choices and other avatars start clean.
+  migrateLegacyPose(want);
   await migrateLegacyBg(want);
   if (saved && saved.startsWith("file:")) {
     const f = await idbGet("characterFile");
     if (f) { addFiles([new File([f], f.name || "avatar.vrm")]); return; }
   }
+  // If 3D is known-broken on this device (no WebGL, or it ran too slow), restore
+  // the 2D character instead of re-failing. Picking a 3D one again retries it.
   if (threeBroken && want !== "mochi") {
     log("3D was unavailable on this device, so the last 3D character isn't being restored. Pick it again to retry.");
     await selectCharacter("mochi");
+    if (EMBED) resize();
     return;
   }
+  // selectCharacter loads this character's own position/size/framing (loadCharPose +
+  // frame) and mirrors them into the picker (syncPickPose).
   await selectCharacter(want);
-  if (framing && !autoFace) VrmAvatar.frame(framing);
   if (EMBED) resize();
 })();
 syncChips();
