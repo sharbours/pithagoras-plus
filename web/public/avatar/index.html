@@ -63,12 +63,17 @@ select{background:var(--chip);border:1px solid var(--line);border-radius:10px;pa
 .stage-top{position:absolute;top:14px;left:14px;right:14px;display:flex;gap:8px;align-items:center;z-index:5;flex-wrap:wrap}
 /* In-voice-stage picker: a small gear button (bottom-left, out of the way) that
    opens character / framing / background selectors over the transparent stage. */
-.picker{position:absolute;left:10px;bottom:10px;z-index:6;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+/* The gear picker is bottom-anchored and grows upward; when its body is tall, its top
+   (the gear + the Character select) used to rise past the stage's top edge and get clipped
+   by .stage{overflow:hidden}, so the avatar-choice control looked "almost invisible."
+   Capping the whole block to the stage height (and letting the body scroll below) keeps
+   the top row lower and always visible. */
+.picker{position:absolute;left:10px;bottom:10px;z-index:6;display:flex;flex-direction:column;align-items:flex-start;gap:6px;max-height:calc(100% - 20px)}
 .picker-row{display:flex;gap:6px;align-items:center}
 .picker-row .pick-size{width:76px;height:34px;accent-color:var(--accent);cursor:pointer}
 .picker-toggle{width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--bubble);cursor:pointer;font-size:16px;display:grid;place-items:center;color:var(--ink)}
 .picker-toggle:hover{background:var(--accent-soft)}
-.picker-body{background:var(--bubble);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:230px;max-width:70vw;box-shadow:0 6px 24px rgba(20,10,40,.18)}
+.picker-body{background:var(--bubble);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-width:230px;max-width:70vw;box-shadow:0 6px 24px rgba(20,10,40,.18);flex:1 1 auto;min-height:0;overflow-y:auto;max-height:100%}
 .picker-body label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;white-space:nowrap}
 .picker-body select{flex:1;min-width:0}
 .picker-body label:has(> input[type=range]){display:flex}

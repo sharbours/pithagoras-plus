@@ -215,7 +215,11 @@
   transition: background .2s, transform .2s;
 }
 .voice-avatar-close:hover { background: rgb(var(--raised)); transform: translateY(-2px); }
-.voice-status { display: flex; align-items: center; justify-content: center; gap: 7px; color: rgb(var(--fg-subtle)); font-size: 12px; white-space: nowrap; margin-top: -20px; transition: margin .6s, font-size .6s; }
+/* The "Listening / Speaking / Hearing you" pill sits just under the avatar. It used to
+   use margin-top:-20px, which tucked its top half up behind the avatar's lower edge so
+   it read as "half covered." A small positive margin drops it clear of the avatar while
+   keeping it close (and the cascade also lowers the mic/mute/end row below it). */
+.voice-status { display: flex; align-items: center; justify-content: center; gap: 7px; color: rgb(var(--fg-subtle)); font-size: 12px; white-space: nowrap; margin-top: 6px; transition: margin .6s, font-size .6s; }
 .voice-status > span { width: 4px; height: 4px; border-radius: 50%; background: rgb(var(--voice-hue)); box-shadow: 0 0 12px rgb(var(--voice-hue) / .45); }
 .voice-stage-controls { display: flex; gap: 14px; margin-top: 28px; transition: margin .6s, gap .6s; }
 /* The stacked status lives in the right-edge column on compact displays only;
