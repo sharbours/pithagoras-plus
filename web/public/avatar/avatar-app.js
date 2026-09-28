@@ -523,6 +523,79 @@ function speakOne(text, token) {
   return new Promise(res => setTimeout(() => { setTalking(false); res(); }, Math.max(700, text.length * 62) / TTS.rate));
 }
 
+/* ---------------------------------------------------------------- Background (per character)
+   The backdrop the stage shows for this character. Stored per character in
+   localStorage, so it sticks every time the character is picked again — same
+   pattern as the Kokoro voice below. A value is either a shipped background id,
+   "upload" (the last uploaded image, kept in IndexedDB under
+   "avatarLab.bgfile.<id>"), or ""/null for none. Before this went per-character
+   there was a single global "background" choice; it's carried over once (see
+   migrateLegacyBg) and then ignored, so one avatar's pick never leaks into
+   another. */
+function bgKey(id) { return "avatarLab.bg." + id; }
+function bgFileKey(id) { return "avatarLab.bgfile." + id; }
+function setCharacterBg(id, value) {
+  id = id || (currentChar && currentChar.id);
+  if (!id) return;
+  // "" is stored as "" = "explicitly none" (distinguished from null = "never
+  // set"), so clearing an avatar's background sticks until it's picked again.
+  const v = (value == null ? null : value);
+  store.set(bgKey(id), v);
+  if (v !== "upload") idbSet(bgFileKey(id), null);   // drop any stored upload
+}
+/* One-time carry-over: move the legacy single global background choice into the
+   given character's per-character key (copying any stored upload file), then
+   clear the global so other avatars start with none. Runs once per page load. */
+async function migrateLegacyBg(id) {
+  if (store.get("bgMigrated")) return;
+  store.set("bgMigrated", "1");
+  const g = store.get("background");
+  if (!g) return;
+  if (store.get(bgKey(id)) == null) {
+    if (g === "upload") {
+      const f = await idbGet("background");
+      if (f) idbSet(bgFileKey(id), f);
+    }
+    setCharacterBg(id, g);
+  }
+  store.set("background", null); idbSet("background", null);
+}
+/* Show the character's own backdrop (strictly per-character; uploads are
+   resolved from IndexedDB). Runs when a character is selected and on page
+   load; it also clears a stale backdrop when switching to one without one. */
+async function applyCharacterBg(id) {
+  id = id || (currentChar && currentChar.id);
+  if (!id) return;
+  const v = store.get(bgKey(id));
+  const isCurrent = currentChar && id === currentChar.id;
+  if (!v || v === "") {
+    if (isCurrent) await applyBackground(null);
+    return;
+  }
+  const sh = shippedBgs.find(b => b.id === v);
+  if (sh) { if (isCurrent) await applyBackground(sh); return; }
+  if (v === "upload") {
+    const f = await idbGet(bgFileKey(id));
+    if (f) { if (isCurrent) await applyBackground({ kind: "upload", name: f.name, file: f }); return; }
+    if (isCurrent) { setCharacterBg(id, ""); await applyBackground(null); }   // marker w/o file
+    return;
+  }
+  if (isCurrent) await applyBackground(null);
+}
+/* Refresh the in-stage picker's "Background" <select> to the current character's
+   own backdrop. No-op on the standalone page (the picker isn't present there). */
+function syncPickBg() {
+  const pb = $("#pickBg");
+  if (!pb || !currentChar) return;
+  const s = store.get(bgKey(currentChar.id));
+  pb.innerHTML = "";
+  const mk = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; pb.appendChild(o); };
+  mk("", "None");
+  for (const b of shippedBgs) mk(b.id, b.name);
+  if (s === "upload") mk("upload", "Uploaded image");
+  pb.value = s || "";
+}
+
 /* ---------------------------------------------------------------- Kokoro voice (per character)
    The voice the portal's TTS (Kokoro, pithagoras-kokoro :7863) uses to speak
    this character. Stored per character in localStorage, so it sticks every
@@ -1392,6 +1465,8 @@ async function selectCharacter(id) {
     currentChar = c;
     store.set("character", c.id);
     syncKokoroVoice();
+    await applyCharacterBg(c.id);   // this character shows its own remembered backdrop
+    syncPickBg();                   // keep the in-stage picker's Background <select> in step
     if (c.file) idbSet("characterFile", c.file);
     const m = c.kind === "vrm" && VrmAvatar.meta();
     $("#credit").textContent = c.credit || (m ? `${m.name || m.title || c.name}${m.authors ? " by " + m.authors.join(", ") : m.author ? " by " + m.author : ""}` : "");
@@ -1594,15 +1669,17 @@ async function applyBackground(b) {
   if (!b) {
     bgBitmap = null; $("#bgImage").hidden = true; $("#bgGif").hidden = true;
     if (bgGifObjUrl) { URL.revokeObjectURL(bgGifObjUrl); bgGifObjUrl = null; }
-    $("#bgClear").hidden = true; store.set("background", null); idbSet("background", null); return;
+    $("#bgClear").hidden = true;
+    if (currentChar) setCharacterBg(currentChar.id, "");   // explicit "none" for this character
+    return;
   }
   // Shipped entries can flag `animated`; an upload is animated when it's a GIF.
-  const animated = b.animated || (b.kind === "upload" && b.file && b.file.type === "image/gif");
+  const animated = b.animated || (b.file && b.file.type === "image/gif");
   if (b.kind === "shipped") {
     const r = await fetch(b.url); if (!r.ok) throw new Error(`Couldn't load ${b.url} (${r.status}).`);
     if (animated) { showAnimatedBg(b.url); }
     else { bgBitmap = await decodeImage(await r.blob()); $("#bgGif").hidden = true; }
-    store.set("background", b.id); idbSet("background", null);
+    if (currentChar) setCharacterBg(currentChar.id, b.id);   // remember for THIS character
   } else {
     if (animated) {
       bgGifObjUrl = URL.createObjectURL(b.file);
@@ -1611,7 +1688,7 @@ async function applyBackground(b) {
       bgBitmap = await decodeImage(b.file);
       $("#bgGif").hidden = true;
     }
-    idbSet("background", b.file); store.set("background", "upload");
+    if (currentChar) { setCharacterBg(currentChar.id, "upload"); idbSet(bgFileKey(currentChar.id), b.file); }
   }
   if (!animated) { $("#bgImage").hidden = false; drawBg(); }
   if (!animated) $("#bgClear").hidden = false;
@@ -1683,7 +1760,7 @@ if ($("#pickTestVoice")) $("#pickTestVoice").onclick = () => testKokoroVoice();
     if (cur) pc.value = cur;
   };
   const syncBgs = () => {
-    const s = store.get("background");
+    const s = store.get(bgKey(currentChar && currentChar.id));
     pb.innerHTML = "";
     const mk = (v, t) => { const o = document.createElement("option"); o.value = v; o.textContent = t; pb.appendChild(o); };
     mk("", "None");
@@ -1816,19 +1893,17 @@ fillCharSelect();
   if (s0 != null) charScale = clamp(+s0, 50, 100) / 100;
   applyPos();
   if (framing) { $("#framing").value = framing; VrmAvatar.frame(framing); }
-  const bid = store.get("background");
-  if (bid) {
-    const sh = shippedBgs.find(b => b.id === bid);
-    if (sh) { try { await applyBackground(sh); } catch { log(`Couldn't restore background ${sh.name}.`); } }
-    else if (bid === "upload") { const f = await idbGet("background"); if (f) try { await applyBackground({ kind: "upload", name: f.name, file: f }); } catch {} }
-  }
+  // If 3D is known-broken on this device (no WebGL, or it ran too slow), restore
+  // the 2D character instead of re-failing. Picking a 3D one again retries it.
+  const want = saved && chars.some(c => c.id === saved) ? saved : "mochi";
+  // Backgrounds are per-character now. Carry any single global background that
+  // predates that over into the character about to be restored (one time), so
+  // an existing setup keeps showing what it chose and other avatars start clean.
+  await migrateLegacyBg(want);
   if (saved && saved.startsWith("file:")) {
     const f = await idbGet("characterFile");
     if (f) { addFiles([new File([f], f.name || "avatar.vrm")]); return; }
   }
-  // If 3D is known-broken on this device (no WebGL, or it ran too slow), restore
-  // the 2D character instead of re-failing. Picking a 3D one again retries it.
-  const want = saved && chars.some(c => c.id === saved) ? saved : "mochi";
   if (threeBroken && want !== "mochi") {
     log("3D was unavailable on this device, so the last 3D character isn't being restored. Pick it again to retry.");
     await selectCharacter("mochi");
