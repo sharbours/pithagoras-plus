@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stripAvatarTags, hidePartialAvatarTag, splitAvatarTags } from '../web/src/avatar-tags.js';
+import { stripAvatarTags, hidePartialAvatarTag, splitAvatarTags, protectAvatarTags } from '../web/src/avatar-tags.js';
+import { speechChunks } from '../web/src/voice.js';
 
 test('known emotions and gestures are stripped, spacing tidied', () => {
   assert.equal(stripAvatarTags('[happy] Sure!'), 'Sure!');
@@ -51,6 +52,21 @@ test('splitAvatarTags: TTS gets the sentence without tags, cues keep them for th
   assert.equal(cueOnly.spoken, '');
   assert.equal(cueOnly.cues, '[giggle]');
 });
+
+test('protectAvatarTags: underscored exercise tags survive cleanup, unknown brackets are left alone', () => {
+  const { guarded, restore } = protectAvatarTags('[exercise:deep_squat:2] Do the _squats_ now [1] and [sic] more [pose:horse].');
+  // PUA token is a single BMP code unit, never a stripped char; unknown [1]/[sic] are left alone.
+  assert.equal(guarded, '\uE000 Do the _squats_ now [1] and [sic] more \uE001.');
+  assert.equal(restore(guarded), '[exercise:deep_squat:2] Do the _squats_ now [1] and [sic] more [pose:horse].');
+  // The full voice pipeline: protect -> speechChunks cleanup -> splitAvatarTags on the restored text.
+  const guardedLong = protectAvatarTags('[exercise:side_lunge:2] and again [exercise:side_lunge:2]');
+  const cleaned = speechChunks(guardedLong.guarded).join(' ');
+  const { cues } = splitAvatarTags(guardedLong.restore(cleaned));
+  const ex = [...cues.matchAll(/\[exercise:([^\]:]+):/g)].map(m => m[1]);
+  assert.deepEqual(ex, ['side_lunge', 'side_lunge']);
+  assert.equal([...new Set(guardedLong.guarded.match(/[\uE000-\uF8FF]/g) || [])].length, 1);
+});
+
 
 test('plain text is untouched', () => {
   assert.equal(stripAvatarTags('Just a normal sentence.'), 'Just a normal sentence.');

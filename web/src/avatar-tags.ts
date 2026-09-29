@@ -30,6 +30,32 @@ export function hidePartialAvatarTag(text: string): string {
   return could ? text.slice(0, m.index) : text;
 }
 
+/**
+ * Swap every known avatar tag for a single Private-Use-Area code point, so a
+ * downstream text-cleanup pass (speechChunks strips markdown `*_`… chars) can
+ * not mangle the tag's name — `deep_squat` must survive as `deep_squat`, not
+ * `deepsquat`. A BMP PUA char is a single UTF-16 code unit (never split by the
+ * chunker's 600-char boundary) and is not a letter, digit, punctuation or
+ * whitespace, so no cleanup / word-count / link pass can touch or consume it.
+ * Pair with the returned `restore`.
+ */
+export function protectAvatarTags(text: string): { guarded: string; restore: (s: string) => string } {
+  const tagToToken = new Map<string, string>();
+  const tokenToTag = new Map<string, string>();
+  let next = 0xe000;
+  const guarded = text.replace(TAG, (all, name, value) => {
+    if (!isTag(name, value)) return all;
+    let token = tagToToken.get(all);
+    if (!token) {
+      token = String.fromCodePoint(next++);
+      tagToToken.set(all, token);
+      tokenToTag.set(token, all);
+    }
+    return token;
+  });
+  return { guarded, restore: s => s.replace(/[\uE000-\uF8FF]/g, t => tokenToTag.get(t) ?? t) };
+}
+
 /** Split one speech chunk into what TTS should say and the cues for the avatar. */
 export function splitAvatarTags(text: string): { spoken: string; cues: string } {
   return { spoken: stripAvatarTags(text), cues: text };

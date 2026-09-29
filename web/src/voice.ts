@@ -1,5 +1,5 @@
 import type { Item } from "./transcript";
-import { stripAvatarTags, hidePartialAvatarTag } from "./avatar-tags";
+import { stripAvatarTags, hidePartialAvatarTag, protectAvatarTags } from "./avatar-tags";
 
 /** Only new completed replies, even when older history is paged into view. */
 export function newSpeech(items: Item[], afterSeq: number, seen: Set<string>): string[] {
@@ -12,9 +12,17 @@ export function newSpeech(items: Item[], afterSeq: number, seen: Set<string>): s
   return chunks;
 }
 
-/** Keep code blocks and link destinations out of speech; split without losing text. */
+/**
+ * Keep code blocks and link destinations out of speech; split without losing
+ * text. Avatar tags are swapped for PUA tokens first, so the markdown cleanup
+ * below cannot mangle a tag's name (`[exercise:deep_squat:2]` must reach the
+ * avatar intact — the exercise library is underscore-delimited, and the
+ * cleanup used to strip every underscore, silently killing every exercise cue
+ * while underscore-free poses/gestures kept working).
+ */
 export function speechChunks(text: string): string[] {
-  const plain = text.replace(/```[\s\S]*?(?:```|$)/g, ' Code is shown in the transcript. ')
+  const { guarded, restore } = protectAvatarTags(text);
+  const plain = guarded.replace(/```[\s\S]*?(?:```|$)/g, ' Code is shown in the transcript. ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
     .replace(/<[^>]*>/g, '').replace(/[*_`#>|]/g, '').replace(/\s+/g, ' ').trim();
   const chunks: string[] = [];
@@ -26,7 +34,7 @@ export function speechChunks(text: string): string[] {
     chunks.push(remaining.slice(0, end)); remaining = remaining.slice(end).trimStart();
   }
   if (remaining) chunks.push(remaining);
-  return chunks;
+  return chunks.map(restore);
 }
 /** Silero already returns mono 16 kHz samples, ready for Whisper. */
 export function samplesWav(samples: Float32Array): Blob {

@@ -206,12 +206,20 @@ function exClip(name) {
   const q = dec(e.q), off = dec(e.off), B = EXERCISES._bones.length;
   return _exCache[name] = { frames: e.frames, q, off, B, bones: EXERCISES._bones, fps: EXERCISES._fps, pose: { rot: {}, off: [0, 0] } };
 }
-function setExercise(name, loops = 3) {
+function setExercise(name, loops = 3, overwrite = false) {
   const key = String(name).toLowerCase().replace(/[\s-]+/g, "_");
-  if (key === "off" || key === "none") { if (S.exercise) S.exercise.until = Math.min(S.exercise.until, now()); return; }
+  if (key === "off" || key === "none") { S.exQ = []; if (S.exercise) S.exercise.until = Math.min(S.exercise.until, now()); return; }
   const clip = exClip(key);
   if (!clip) { log(EXERCISES ? `No exercise called "${name}". Exercises: ${exerciseNames().join(", ")}` : "No exercise library loaded (exercises.js)."); return; }
-  if (active !== VrmAvatar) log("Exercises need a 3D (VRM) character.");
+  if (active !== VrmAvatar) { log("Exercises need a 3D (VRM) character."); return; }
+  const n = Math.max(1, Math.round(+loops || 3));
+  // A cue batch can name several exercises at once (they arrive faster than any
+  // one clip lasts). Queue them so each plays back-to-back; `overwrite` (chip /
+  // JSON command) jumps straight to the requested clip.
+  if (overwrite || !S.exercise) { S.exQ = overwrite ? [] : S.exQ; startExercise(clip, key, n); }
+  else (S.exQ = S.exQ || []).push({ clip, key, loops: n });
+}
+function startExercise(clip, key, loops) {
   const t = now(), dur = clip.frames / clip.fps * 1000;
   S.exercise = { name: key, clip, t0: t, until: t + dur * Math.max(1, loops), noArms: EX_RELAXED_ARMS.has(key) }; if (S.stance) S.stance.until = t;
   emit("exercise", { exercise: key, loops });
@@ -434,7 +442,7 @@ const S = {
   blink: 0, blinkT: 0, nextBlink: now() + 1500, doubleBlink: false,
   mouth: 0, viseme: "aa", syllOpen: false, nextSyll: 0, mouthTarget: 0,
   speaking: false, humUntil: 0, yawn: null,
-  gestures: [], nextIdle: now() + 1500, mic: 0,
+  gestures: [], exQ: [], nextIdle: now() + 1500, mic: 0,
   params: { ...P.neutral }, pose: {},
 };
 
@@ -849,7 +857,7 @@ function command(c) {
   if (c.gesture) [].concat(c.gesture).forEach(gesture);
   if (c.expression) setCustomExpression(c.expression, c.value ?? 1, c.hold ?? 3000);
   if (c.pose) setPose(c.pose, c.hold ?? 3000);
-  if (c.exercise) setExercise(c.exercise, c.loops ?? 3);
+  if (c.exercise) setExercise(c.exercise, c.loops ?? 3, true);
   if (c.state) setConversationState(c.state);
   if (c.cues) playCues(c.cues, c.durationMs);
   if (c.look) S.lookOverride = { x: clamp(+c.look.x || 0, -1, 1), y: clamp(+c.look.y || 0, -1, 1), until: now() + (c.look.hold ?? 2000) };
@@ -1003,7 +1011,11 @@ function step(t, dt) {
   }
   if (S.exercise) {                                   // an exercise clip drives the body through the pose system
     const ex = S.exercise, w = Math.max(0, Math.min(sstep((t - ex.t0) / 500), 1 - sstep((t - ex.until) / 600)));
-    if (w <= 0 && t > ex.until) S.exercise = null;
+    if (w <= 0 && t > ex.until) {
+      S.exercise = null;
+      const next = (S.exQ || []).shift();             // a queued clip from the same cue batch: play it next
+      if (next) startExercise(next.clip, next.key, next.loops);
+    }
     else { Q.pose = exercisePose(ex, t); Q.poseW = w; Q.poseMask = ex.noArms ? "noarms" : null; Q.poseFrom = null; }
   }
   for (const set of [Q.arms, Q.armsV]) for (const side of ["L", "R"]) { const a = set[side]; set[side] = { s: lerp(REST_ARM.s, a.s, a.w), f: lerp(REST_ARM.f, a.f, a.w), e: lerp(REST_ARM.e, a.e, a.w), r: lerp(REST_ARM.r, a.r, a.w) }; }
@@ -1711,8 +1723,8 @@ for (const g of Object.keys(GESTURES)) {
   const b = document.createElement("button"); b.className = "chip"; b.textContent = g[0].toUpperCase() + g.slice(1);
   b.onclick = () => gesture(g); gesChips.appendChild(b);
 }
-{ const ec = $("#exerciseChips"); for (const n of exerciseNames()) { const bt = document.createElement("button"); bt.className = "chip"; bt.textContent = n.replace(/_/g, " "); bt.onclick = () => setExercise(n, 3); ec.appendChild(bt); }
-  if (!exerciseNames().length) ec.textContent = "Add exercises.js next to this page to enable the exercise library."; }
+{ const ec = $("#exerciseChips"); if (exerciseNames().length) { for (const n of exerciseNames()) { const bt = document.createElement("button"); bt.className = "chip"; bt.textContent = n.replace(/_/g, " "); bt.onclick = () => setExercise(n, 3, true); ec.appendChild(bt); } }
+  else ec.textContent = "Add exercises.js next to this page to enable the exercise library."; }
 { for (const n of Object.keys(KARATE)) { const pc = $(KARATE[n].pack === "ballet" ? "#balletChips" : "#poseChips"); const bt = document.createElement("button"); bt.className = "chip"; bt.textContent = n; bt.onclick = () => setPose(n, 3500); pc.appendChild(bt); } }
 function syncChips() { emoChips.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c.dataset.e === S.target.emotion)); }
 
