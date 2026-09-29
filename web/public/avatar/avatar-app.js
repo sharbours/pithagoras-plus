@@ -177,6 +177,8 @@ const HP = {
   wave:       { tw: 1, fl: 0 },
   clap:       { tw: 0, fl: -.6 },
   raisetheroof: { arm: { s: 1.02, f: .54, e: 2.16, r: .41 }, hand: { tw: -2.75, fl: -1 } },
+  // phone move: right wrist while reading (screen toward the eyes), left wrist while tapping
+  phone: { rtw: -1.7, rfl: .2, ltw: -2.4, lfl: -1.54, tap: { s: .26, f: .54, e: 2.41, r: -.61 } },
   facepalm:   { tw: -1.6, fl: -.2 },
   giggle:     { tw: -1.75, fl: .2 },
 };
@@ -405,6 +407,25 @@ const GESTURES = {
                   const aL = { s: .5 + .15 * sw, f: .35 + .5 * sw, e: 1.1, r: -.2 }, aR = { s: .5 - .15 * sw, f: .35 - .5 * sw, e: 1.1, r: -.2 };
                   arm(P, "L", w, aL, aL); arm(P, "R", w, aR, aR);
                   hand(P, "L", w, "fist", { c: [.5, .6, .7, .75, .8] }); hand(P, "R", w, "fist", { c: [.5, .6, .7, .75, .8] }); } },
+  // Phone: right hand takes the phone from the back pocket, holds it at chest height tilted toward the
+  // eyes; the head tilts down; the left index finger taps the screen four times; read; put it back.
+  phone:      { dur: 9000, run(p, t, P) {
+                  const R0 = REST_ARM, POCKET = { s: .55, f: -.55, e: .92, r: -.85 }, READ = { s: .31, f: .12, e: 1.8, r: -.36 }, TAP = HP.phone.tap;
+                  const RA = kf(p, [[0, R0], [.08, POCKET], [.13, POCKET], [.24, READ], [.84, READ], [.92, POCKET], [.95, POCKET], [1, R0]]);
+                  arm(P, "R", 1, RA, RA);
+                  const grip = kf(p, [[0, 0], [.09, 0], [.115, 1], [.915, 1], [.95, 0]]), hp = HP.phone;
+                  const rt = kf(p, [[.13, 0], [.24, 1], [.84, 1], [.92, 0]]);
+                  hand(P, "R", Math.max(grip, .01), "relaxed", { c: [.45, .55, .62, .66, .7], x: .55, sp: 0, tw: hp.rtw * rt, fl: hp.rfl * rt });
+                  P.phone = p > .115 && p < .915 ? 1 : 0;
+                  const LA = kf(p, [[0, R0], [.3, R0], [.37, TAP], [.52, TAP], [.59, R0], [1, R0]]);
+                  arm(P, "L", 1, LA, LA);
+                  const lw = kf(p, [[0, 0], [.3, 0], [.36, 1], [.53, 1], [.58, 0]]);
+                  const tap = p > .375 && p < .515 ? Math.max(0, Math.sin((p - .375) / .14 * 4 * TAU)) : 0;   // four taps
+                  hand(P, "L", Math.max(lw, .01), "point", { tw: hp.ltw, fl: hp.lfl - .35 * tap });
+                  const look = kf(p, [[0, 0], [.2, 0], [.29, 1], [.8, 1], [.87, 0]]);
+                  P.hx += .42 * look; P.lookY -= .9 * look; P.hy -= .06 * look;
+                  P.hx += .05 * kf(p, [[0, 0], [.05, 1], [.12, 1], [.18, 0], [.86, 0], [.9, 1], [.95, 1], [1, 0]]);   // glance toward the pocket
+                } },
   lookaround: { dur: 3200, run(p, t, P) { const w = env(p, .12, .12), x = Math.sin(p * TAU);
                   P.hy += .45 * x * w; P.lookX += .8 * x * w; } },
   sigh:       { dur: 2400, run(p, t, P) { const inh = p < .35 ? sstep(p / .35) : 0, exh = p >= .35 ? env((p - .35) / .65, .2, .4) : 0;
@@ -996,7 +1017,7 @@ function step(t, dt) {
   let hy = Math.sin(ts * .41) * .05 + S.look.x * .12;
   let hz = S.params.headZ + Math.sin(ts * .63) * .025 + Math.sin(ts * 1.37) * .01;
   const Q = { hx, hy, hz, by: 0, bx: 0, bz: 0, shrug: 0, lookX: 0, lookY: 0, arms: { L: { ...REST_ARM, w: 0 }, R: { ...REST_ARM, w: 0 } }, armsV: { L: { ...REST_ARM, w: 0 }, R: { ...REST_ARM, w: 0 } },
-    hands: { L: { ...REST_HAND, w: 0 }, R: { ...REST_HAND, w: 0 } }, wink: 0, flip: 0, spin: 0, lift: 0, crouch: 0, tuck: 0, kneeL: 0, kneeR: 0 };
+    hands: { L: { ...REST_HAND, w: 0 }, R: { ...REST_HAND, w: 0 } }, wink: 0, flip: 0, spin: 0, lift: 0, crouch: 0, tuck: 0, kneeL: 0, kneeR: 0, phone: 0 };
   if (S.target.emotion === "sleepy") Q.hz += Math.sin(ts * .8) * .05 * S.w.sleepy;
   S.gestures = S.gestures.filter(g => t - g.t0 < g.dur);
   for (const g of S.gestures) GESTURES[g.name].run((t - g.t0) / g.dur, (t - g.t0) / 1000, Q);
@@ -1185,6 +1206,23 @@ const VrmAvatar = (() => {
   let geomTop = 1.65; // world-space Y of the top of the model's geometry (top of hair); fitted per load
   let geomBottom = 0; // world-space Y of the bottom of the model's geometry (feet); fitted per load
   let baseQ, flipQ, spinQ, tmpV, tmpV2, AXIS_X, AXIS_Y;
+  let phone = null;
+  function makePhone() {
+    const g = new THREE.Group(); g.visible = false; g.name = "PhoneProp";
+    // long axis along the fingers (x), screen on the palm side (-y) so it faces away from the palm
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(.148, .009, .071), new THREE.MeshStandardMaterial({ color: 0x1c1f26, roughness: .35, metalness: .5 })));
+    const c = document.createElement("canvas"); c.width = 128; c.height = 256; const x = c.getContext("2d");
+    const grd = x.createLinearGradient(0, 0, 0, 256); grd.addColorStop(0, "#3b5bdb"); grd.addColorStop(1, "#7b2ff7"); x.fillStyle = grd; x.fillRect(0, 0, 128, 256);
+    x.fillStyle = "rgba(255,255,255,.9)"; x.font = "bold 22px sans-serif"; x.fillText("9:41", 38, 40);
+    const cols = ["#ff6b6b", "#ffd43b", "#51cf66", "#339af0", "#f783ac", "#20c997", "#ff922b", "#845ef7", "#adb5bd", "#fab005", "#4dabf7", "#e64980"];
+    cols.forEach((col, i) => { x.fillStyle = col; const cx = 14 + (i % 4) * 27, cy = 70 + Math.floor(i / 4) * 34; x.beginPath(); x.roundRect ? x.roundRect(cx, cy, 20, 20, 5) : x.rect(cx, cy, 20, 20); x.fill(); });
+    x.fillStyle = "rgba(255,255,255,.85)"; x.beginPath(); x.roundRect ? x.roundRect(12, 190, 104, 44, 10) : x.rect(12, 190, 104, 44); x.fill();
+    x.fillStyle = "#495057"; x.fillRect(22, 202, 70, 6); x.fillRect(22, 216, 50, 6);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace; tex.center.set(.5, .5); tex.rotation = Math.PI / 2;
+    const screen = new THREE.Mesh(new THREE.PlaneGeometry(.138, .064), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+    screen.rotation.x = Math.PI / 2; screen.position.y = -.0047; g.add(screen);
+    return g;
+  }
   let lights = [], brightness = .7;
   function setBrightness(k) { brightness = k; for (const [l, base] of lights) l.intensity = Math.PI * base * k; }
   /* Spin physics. VRoid hair is tuned stiff and damped, and some models anchor their springs to a
@@ -1395,6 +1433,9 @@ const VrmAvatar = (() => {
           if (nf) { nf.getWorldPosition(fp); v.scene.worldToLocal(fp); restY.foot = Math.max(.02, fp.y); }
           if (nt) { nt.getWorldPosition(fp); v.scene.worldToLocal(fp); restY.toes = Math.max(.01, fp.y); } else restY.toes = restY.foot;
           kneeR = .05 * hipHeight / .85; }
+        // the phone prop lives on the (normalized) right hand; shown only during the phone move
+        phone = makePhone(); const rhand = v.humanoid.getNormalizedBoneNode("rightHand");
+        if (rhand) { rhand.add(phone); phone.position.set(isV0 ? .062 : -.062, -.017, .004); }
         const head = v.humanoid.getRawBoneNode("head");
         const hp = new THREE.Vector3(); if (head) head.getWorldPosition(hp); headY = hp.y || 1.4;
         // top/bottom of the model's actual geometry (top of hair / feet) in world space —
@@ -1482,6 +1523,7 @@ const VrmAvatar = (() => {
 
     lookTarget.position.set(camera.position.x + S.look.x * .55, camera.position.y - S.look.y * .38, camera.position.z);
     if (o.poseW > 0) applyPose(o);
+    if (phone) phone.visible = o.phone > .5;
     spinPhysics(o, dt);
     vrm.update(dt);
     const t0 = performance.now();
