@@ -20,7 +20,7 @@ window.AVATAR_CHARACTERS.push(
     credit: "Halcyon Android — procedural VRM (Avatar Lab)" },
   { id: "model20", name: "Model 20", url: "characters/Model20.vrm" },
   { id: "model21", name: "Model21", url: "characters/Model21.vrm" },
-  { id: "nagle-v5-dress", name: "Nagle (V9)", url: "characters/Nagle-V9.vrm",
+  { id: "nagle-v5-dress", name: "Nagle (V11)", url: "characters/Nagle-V11.vrm",
     credit: "SiliconForest.net 2026" },
   { id: "scarab-hexapod", name: "Scarab Hexapod", url: "characters/Scarab-Hexapod.vrm",
     credit: "Scarab Hexapod — procedural VRM (Avatar Lab)" },
