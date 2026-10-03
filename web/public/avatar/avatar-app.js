@@ -200,6 +200,18 @@ const KARATE = {"guard":{"src":"Preset_Pose 01","rot":{"hips":[0.03632,0.02272,-
    Vicon motion capture: per-frame bone world rotations in VRM space (int16), 30 fps, two repetitions per loop,
    plus horizontal hip travel as a fraction of leg length. Loaded from exercises.js when present. */
 const EXERCISES = window.AVATAR_EXERCISES || null;
+// library.js: the mixamo-derived motion set (animated clips + static poses +
+// idle pool). Loaded from window.AVATAR_LIBRARY when present; its 22-bone
+// order and 30fps rate match EXERCISES exactly, so clips merge 1:1.
+const LIB = window.AVATAR_LIBRARY || null;
+const LIB_POSES = LIB ? LIB.poses : null;
+const LIB_IDLE = (LIB && LIB.idlePool) ? LIB.idlePool.slice() : [];
+// Fold library clips into EXERCISES so exClip/exerciseNames/setExercise see
+// them as one library (exercise.js entries win on name collision).
+if (LIB && LIB.clips) {
+  if (!EXERCISES) window.AVATAR_EXERCISES = EXERCISES = { _bones: LIB._bones, _fps: LIB._fps, _source: "mixamo" };
+  for (const k in LIB.clips) if (!EXERCISES[k]) EXERCISES[k] = LIB.clips[k];
+}
 const _exCache = {};
 function exClip(name) {
   if (!EXERCISES || !EXERCISES[name] || name.startsWith("_")) return null;
@@ -239,10 +251,18 @@ function exercisePose(ex, t) {
   c.pose.off[0] = (c.off[i * 2] * (1 - f) + c.off[i * 2 + 2] * f) / 16000; c.pose.off[1] = (c.off[i * 2 + 1] * (1 - f) + c.off[i * 2 + 3] * f) / 16000;
   return c.pose;
 }
+// Resolve a pose key to its {rot, drop, hands} entry: KARATE (hand-tuned)
+// first, then the mixamo library. Normalises spaces/hyphens so "female
+// standing pose" and "female-standing-pose" both land. Null when unknown.
+function resolvePose(key) {
+  if (key == null) return null;
+  const k = String(key).toLowerCase().replace(/[\s-]+/g, "_");
+  return KARATE[k] || KARATE[String(key).toLowerCase()] || (LIB_POSES && (LIB_POSES[k] || LIB_POSES[String(key).toLowerCase()])) || null;
+}
 function setPose(name, holdMs = 3000, opts = {}) {
-  const key = String(name).toLowerCase();
+  const key = String(name).toLowerCase().replace(/[\s-]+/g, "_");
   if (key === "none" || key === "off") { if (S.stance) S.stance.until = Math.min(S.stance.until, now()); return; }
-  if (!KARATE[key]) { log(`No pose called "${name}". Poses: ${Object.keys(KARATE).join(", ")}`); return; }
+  if (resolvePose(key) == null) { log(`No pose called "${name}". Poses: ${Object.keys(KARATE).concat(LIB_POSES ? Object.keys(LIB_POSES) : []).join(", ")}`); return; }
   if (active !== VrmAvatar) log("Poses need a 3D (VRM) character.");
   const t = now(), wasOn = S.stance && t < S.stance.until + 400;
   const t1 = t + (opts.delay || 0);
@@ -551,6 +571,13 @@ function applyTags(tags) {
     else if (t.name === "expr" && t.value) setCustomExpression(t.value, t.value2 ? parseFloat(t.value2) : 1, 3000);
     else if (t.name === "pose" && t.value) setPose(t.value, t.value2 ? parseFloat(t.value2) * 1000 : 3000);
     else if (t.name === "exercise" && t.value) setExercise(t.value, t.value2 ? parseFloat(t.value2) : 3);
+    else if ((t.name === "mixamo" || t.name === "dance") && t.value) {
+      const key = String(t.value).toLowerCase().replace(/[\s-]+/g, "_");
+      const loops = t.value2 ? parseFloat(t.value2) : 1;
+      if (EXERCISES && EXERCISES[key]) setExercise(key, loops, true);
+      else if (LIB_POSES && LIB_POSES[key]) setPose(key, 3000);
+      else log(`No motion called "${t.value}".`);
+    }
     else if (TAG_ALIAS[t.name] === "pose" && t.value) setPose(t.value, t.value2 ? parseFloat(t.value2) * 1000 : 3000);
     else log(`Ignored unknown tag [${t.name}]`);
   }
@@ -898,8 +925,16 @@ function command(c) {
   if (c.emotion) setEmotion(c.emotion, c.intensity ?? 0.85, c.hold ?? 4000, true);
   if (c.gesture) [].concat(c.gesture).forEach(gesture);
   if (c.expression) setCustomExpression(c.expression, c.value ?? 1, c.hold ?? 3000);
-  if (c.pose) setPose(c.pose, c.hold ?? 3000);
+  if (c.pose) { const k = String(c.pose).toLowerCase().replace(/[\s-]+/g, "_"); if (KARATE[k]) setPose(c.pose, c.hold ?? 3000); else setExercise(c.pose, c.loops ?? 1, true); }
+  if (c.motion) setExercise(String(c.motion).toLowerCase().replace(/[\s-]+/g, "_"), c.loops ?? 1, true);
   if (c.exercise) setExercise(c.exercise, c.loops ?? 3, true);
+  // mixamo library: one key for the whole motion set (clips + static poses)
+  if (c.mixamo || c.dance) {
+    const key = String(c.mixamo || c.dance).toLowerCase().replace(/[\s-]+/g, "_");
+    if (EXERCISES[key]) setExercise(key, c.loops ?? 3, true);
+    else if (resolvePose(key)) setPose(key, c.hold ?? 4000);
+    else log(`No "${c.mixamo || c.dance}" in the motion library.`);
+  }
   if (c.state) setConversationState(c.state);
   if (c.cues) playCues(c.cues, c.durationMs);
   if (c.look) S.lookOverride = { x: clamp(+c.look.x || 0, -1, 1), y: clamp(+c.look.y || 0, -1, 1), until: now() + (c.look.hold ?? 2000) };
@@ -984,10 +1019,11 @@ function step(t, dt) {
 
   // idle behaviours
   if (S.mode === "idle" && !S.speaking && t > S.nextIdle) {
-    const a = weighted({ glance: 4, emote: 4, gesture: 2.2, hum: 1, yawn: .5, rest: 2 });
+    const a = weighted({ glance: 4, emote: 4, gesture: 2.2, mixamo: LIB_IDLE.length ? 2 : 0, hum: 1, yawn: .5, rest: 2 });
     if (a === "glance") S.glance = { x: rand(-.9, .9), y: rand(-.55, .45), until: t + rand(700, 2600) };
     if (a === "emote") setEmotion(weighted({ happy: 3, relaxed: 2, thinking: 2, surprised: 1, shy: 1, sleepy: .7, sad: .4, angry: .25 }), rand(.45, .9), rand(1800, 4200));
     if (a === "gesture") gesture(weighted({ tilt: 3, nod: 2, bounce: 1.2, lookaround: 1.2, wave: .6, shrug: .6, scratch: .5, think: .5, sigh: .35, shake: .3, clap: .25, cheer: .2, point: .2, dance: .15, jump: .15, facepalm: .15, bow: .1, stretch: .3, giggle: .3, hips: .25, crossarms: .15, backflip: .05, spin: .05, groove: .15, armwave: .08, raisetheroof: .06, disco: .05, pirouette: .04 }));
+    if (a === "mixamo" && LIB_IDLE.length) { const k = LIB_IDLE[(Math.random() * LIB_IDLE.length) | 0], clip = exClip(k); if (clip) startExercise(clip, k, 1); }
     if (a === "hum") { S.humUntil = t + rand(1200, 2200); setEmotion("relaxed", .6, 2400); }
     if (a === "yawn") { setEmotion("sleepy", .85, 2800); S.yawn = { t0: t + 300, dur: 2000 }; }
     S.nextIdle = t + rand(1800, 5200);
@@ -1045,11 +1081,11 @@ function step(t, dt) {
   Q.poseW = 0;
   if (S.stance) {
     const ps = S.stance, win = sstep((t - ps.t0) / 400), wout = 1 - sstep((t - ps.until) / 450);
-    Q.poseW = Math.max(0, Math.min(win, wout)); Q.pose = KARATE[ps.name]; Q.poseMask = ps.mask;
+    Q.poseW = Math.max(0, Math.min(win, wout)); Q.pose = resolvePose(ps.name); if (!Q.pose) { Q.pose = { rot: {}, drop: 0, hands: { L: REST_HAND, R: REST_HAND } }; } Q.poseMask = ps.mask;
     // when switching from one pose straight to another, blend between them
-    Q.poseFrom = ps.from ? KARATE[ps.from] : null; Q.poseMix = sstep((t - ps.switchT) / 400);
+    Q.poseFrom = resolvePose(ps.from); Q.poseMix = sstep((t - ps.switchT) / 400);
     if (Q.poseW <= 0 && t > ps.until) S.stance = null;
-    else if (!ps.mask) for (const side of ["L", "R"]) hand(Q, side, Q.poseW, "relaxed", Q.pose.hands[side]);
+    else if (!ps.mask && Q.pose.hands) for (const side of ["L", "R"]) hand(Q, side, Q.poseW, "relaxed", Q.pose.hands[side]);
   }
   if (S.exercise) {                                   // an exercise clip drives the body through the pose system
     const ex = S.exercise, w = Math.max(0, Math.min(sstep((t - ex.t0) / 500), 1 - sstep((t - ex.until) / 600)));
@@ -1788,7 +1824,8 @@ for (const g of Object.keys(GESTURES)) {
 }
 { const ec = $("#exerciseChips"); if (exerciseNames().length) { for (const n of exerciseNames()) { const bt = document.createElement("button"); bt.className = "chip"; bt.textContent = n.replace(/_/g, " "); bt.onclick = () => setExercise(n, 3, true); ec.appendChild(bt); } }
   else ec.textContent = "Add exercises.js next to this page to enable the exercise library."; }
-{ for (const n of Object.keys(KARATE)) { const pc = $(KARATE[n].pack === "ballet" ? "#balletChips" : "#poseChips"); const bt = document.createElement("button"); bt.className = "chip"; bt.textContent = n; bt.onclick = () => setPose(n, 3500); pc.appendChild(bt); } }
+{ for (const n of Object.keys(KARATE)) { const pc = $(KARATE[n].pack === "ballet" ? "#balletChips" : "#poseChips"); const bt = document.createElement("button"); bt.className = "chip"; bt.textContent = n; bt.onclick = () => setPose(n, 3500); pc.appendChild(bt); }
+  if (LIB_POSES) for (const n of Object.keys(LIB_POSES)) { const pc = $("#poseChips"); if (!pc) continue; const bt = document.createElement("button"); bt.className = "chip"; bt.textContent = n.replace(/_/g, " "); bt.onclick = () => setPose(n, 3500); pc.appendChild(bt); } }
 function syncChips() { emoChips.querySelectorAll(".chip").forEach(c => c.classList.toggle("on", c.dataset.e === S.target.emotion)); }
 
 const SAMPLES = {
