@@ -22,6 +22,8 @@ window.AVATAR_CHARACTERS.push(
   { id: "model21", name: "Model21", url: "characters/Model21.vrm" },
   { id: "nagle-v5-dress", name: "Nagle (V12)", url: "characters/Nagle-V12.vrm",
     credit: "SiliconForest.net 2026" },
+  { id: "nagle-hat-v15", name: "Nagle-Hat (V15)", url: "characters/Nagle-V15.vrm",
+    credit: "SiliconForest.net 2026" },
   { id: "scarab-hexapod", name: "Scarab Hexapod", url: "characters/Scarab-Hexapod.vrm",
     credit: "Scarab Hexapod — procedural VRM (Avatar Lab)" },
   { id: "steampunk-automaton", name: "Steampunk Automaton", url: "characters/Steampunk-Automaton.vrm",
