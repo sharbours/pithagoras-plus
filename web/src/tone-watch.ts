@@ -1,27 +1,31 @@
 /**
  * ToneWatcher: spectral tripwire on the voice playback analyser.
  *
- * The user reports an occasional even high-pitched tone/squeal while the
- * avatar talks; the pitch varies per episode. The server-side TTS PCM/WAV
- * has been verified clean (no narrowband peaks, no repeated-sample patterns),
- * so this watches the audio that actually reaches the speakers — the
- * AnalyserNode in the playback path — and reports sustained narrowband
- * high-frequency peaks.
+ * The user reports an occasional tone while the avatar talks. The server-side
+ * TTS PCM/WAV has been verified clean (no narrowband peaks, no
+ * repeated-sample patterns), so this watches the audio that actually reaches
+ * the speakers — the AnalyserNode in the playback path — and reports a
+ * sustained narrowband peak.
  *
- * A "tone" = one spectral bin that (a) stands far above its neighbours
- * (peak-to-neighbor dB gap) and (b) has real absolute energy, persisting
- * for >= 12 consecutive ~30ms frames (~0.35s). Speech sibilants are
- * broadband and don't satisfy (a); a howl / feedback / oscillator does.
+ * Band is 100–200 Hz: a low-hum window targeting the 120 Hz tone the user
+ * hears (120 Hz = 2× 60 Hz mains; a square wave = odd-harmonic comb). The
+ * 120 Hz fundamental is a narrow peak inside this window; the odd harmonics
+ * (360/600/840 Hz) fall above the 200 Hz ceiling and so are NOT trigger
+ * candidates — but the full-spectrum snapshot below still records them, which
+ * is exactly the shape that confirms a square wave versus a lone tone.
  *
- * Band is 1 kHz → Nyquist (full high end, incl. 16-20k where integrated
- * PC speakers tend to ring / alias — the old 1.5-16k cap was blind there).
+ * A "tone" = one spectral bin in the band that (a) stands far above its
+ * ±30-bin neighbourhood (peak-to-neighbour dB gap — the neighbourhood
+ * extends past the band, so a 120 Hz peak is contrasted against surrounding
+ * speech formants 200–3k Hz, which is what separates a hum from voice) and
+ * (b) has real absolute energy, persisting for >= 12 consecutive ~30ms
+ * frames (~0.35s). Broadband speech/sibilants don't satisfy (a).
+ *
  * Every finding carries a full-spectrum snapshot (all bins, dBFS) so the
- * shape — a lone 1-2 bin spike (digital tone / feedback) vs a broader
- * multi-harmonic hump (speaker resonance) — is captured, not just the
- * peak bin. Findings are posted to the portal (server log + session file)
- * so the frequency and shape can be correlated with hardware (speaker
- * resonance, USB audio quirk, OS audio driver) without the user at the
- * computer.
+ * harmonic comb is captured, not just the peak bin. Findings are posted to
+ * the portal (server log + session file) so the frequency and shape can be
+ * correlated with hardware (mains hum, coil whine, codec) without the user at
+ * the computer.
  */
 export interface ToneFinding {
   kind: 'tone';
@@ -69,25 +73,25 @@ export class ToneWatcher {
     this.analyser.getFloatFrequencyData(this.buf);
     const n = this.buf.length;
     const fs = this.ctx.sampleRate;
-    // 1 kHz → Nyquist: the high end where integrated speakers ring/alias
-    // (16-20k) included; low hums are out of scope for this symptom.
-    const lo = Math.max(2, Math.floor(1000 / fs * n));
-    // populated bins = fftSize/2 + 1 (DC..Nyquist); exclude the Nyquist bin
-    // (a flat 0 at DC-folding, never a tone) → upper bound fftSize/2.
-    const hi = Math.min(n - 1, this.analyser.fftSize / 2);
+    // 100–200 Hz low-hum window: a 120 Hz square-wave fundamental (2× mains)
+    // is a narrow peak here; the odd harmonics (360/600/840…) are above the
+    // ceiling and so are not trigger candidates (the spectrum snapshot
+    // records them instead). DC is excluded at the lo bound (≥ ~100 Hz).
+    const lo = Math.max(1, Math.floor(100 / fs * n));
+    // upper bound = first bin at/above 200 Hz (exclusive), clamped to the
+    // analyser's populated bins so a tail of 0 dB never reads as a fake tone.
+    const hi = Math.min(n - 1, Math.ceil(200 / fs * n));
     if (hi <= lo) return;
-    // strongest bin in the band. Upper limit = the analyser's populated bin
-    // count (fftSize/2), excluding the Nyquist bin itself: a buffer larger
-    // than the analyser's fftSize/2 (or a smaller analyser than the buffer)
-    // leaves the tail at 0 dB, which would otherwise register as a fake
-    // "tone". DC is excluded at the lo bound (≥ ~1 kHz here).
+    // strongest bin in the band; its ±30-bin neighbourhood extends beyond
+    // the band, so the 120 Hz peak is contrasted against surrounding speech
+    // (formants 200–3k Hz), which is what separates a hum from voice.
     let pb = -1, pm = -Infinity;
     for (let i = lo; i < hi; i++) if (this.buf[i] > pm) { pm = this.buf[i]; pb = i; }
     if (pb < 0) return;
     const hz = fs * pb / n;
-    // neighbourhood average over ±30 bins (~±700 Hz): a pure tone is 1-2 bins
-    // wide, so it stands far above its wide-band average; a sibilant or other
-    // broadband speech energy (hundreds of Hz wide) does not.
+    // neighbourhood average over ±30 bins: a pure tone is 1-2 bins wide, so
+    // it stands far above its wide-band average; broadband speech energy does
+    // not. (The window spans beyond the 100–200 Hz band on both sides.)
     let sum = 0, cnt = 0;
     for (let k = 1; k <= 30; k++) {
       if (pb - k >= 0) { sum += this.buf[pb - k]; cnt++; }
