@@ -29,7 +29,7 @@ export function stripAvatarTags(text: string): string {
   return text
     .replace(/[\u0000-\u001F\u007F\u00AD\u034F\u061C\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, "") // invisible / control chars
     .replace(/\p{Extended_Pictographic}[\u{1F3FB}-\u{1F3FF}\uFE0F\u20E3]*/gu, " ") // emoji, incl. modifier + ZWJ sequences
-    .replace(/[\u2190-\u21FF\u2300-\u23FF\u2460-\u24FF\u25A0-\u25FF\u2600-\u26FF\u2700-\u27BF\u2B00-\u2BFF]/g, " ") // arrows, dingbats, geometric, misc symbols
+    .replace(/[\u2190-\u21FF\u2300-\u23FF\u2460-\u24FF\u25A0-\u25FF\u2600-\u26FF\u2700-\u27BF\u2B00-\u2BFF\u{1F1E6}-\u{1F1FF}]/gu, " ") // arrows, dingbats, geometric, misc symbols, flag (regional-indicator) pairs
     .replace(TAG, (all, name, value) => (isTag(name, value) ? " " : all))
     .replace(/[ \t]{2,}/g, " ").replace(/[ \t]+([,.!?])/g, "$1").trim();
 }

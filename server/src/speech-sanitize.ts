@@ -25,7 +25,7 @@ const INVISIBLE = /[\u034F\u061C\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u20
 // Every pictographic symbol the TTS would otherwise read by name: emoji, dingbats,
 // arrows, geometric shapes, misc symbols. \p{Extended_Pictographic} covers the
 // astral emoji; the BMP ranges catch the older dingbat/arrow/symbol sets.
-const DECORATIVE = /[\u2190-\u21FF\u2300-\u23FF\u2460-\u24FF\u25A0-\u25FF\u2600-\u26FF\u2700-\u27BF\u2B00-\u2BFF\p{Extended_Pictographic}]/gu;
+const DECORATIVE = /[\u2190-\u21FF\u2300-\u23FF\u2460-\u24FF\u25A0-\u25FF\u2600-\u26FF\u2700-\u27BF\u2B00-\u2BFF\u{1F1E6}-\u{1F1FF}\p{Extended_Pictographic}]/gu;
 // Balanced bracket segments that look like a tag: a colon inside the brackets,
 // or a markdown link ([text](...)). The match ends at the matching "]" / ")",
 // so adjacent prose is never consumed.

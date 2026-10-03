@@ -21,6 +21,26 @@ test('prefixed tags need a value; bare ones and unknown names are kept', () => {
   assert.equal(stripAvatarTags('[pose:' + 'x'.repeat(45) + '] hi'), '[pose:' + 'x'.repeat(45) + '] hi');
 });
 
+// The voice model invents prefixes — [kick:highkick], [block:block] — where the
+// vocabulary only has [pose:...]. Those are stripped from TTS here; the avatar
+// re-maps them to poses itself (TAG_ALIAS in avatar-app.js).
+test('invented [word:value] prefixes are stripped from TTS', () => {
+  assert.equal(stripAvatarTags('[kick:highkick] Here is my high kick!'), 'Here is my high kick!');
+  assert.equal(stripAvatarTags('[block:block] Here is my strong block!'), 'Here is my strong block!');
+  assert.equal(stripAvatarTags('[block:kneeblock] And finish!'), 'And finish!');
+  // cues keep every bracket for the avatar to interpret
+  const s = splitAvatarTags('[kick:highkick] Here is my high kick!');
+  assert.equal(s.cues, '[kick:highkick] Here is my high kick!');
+});
+
+test('emoji never reach TTS (Kokoro would read them by name)', () => {
+  assert.equal(stripAvatarTags('Here is my strong block! \u{1F4A5}'), 'Here is my strong block!');
+  assert.equal(stripAvatarTags('Here is my high kick! \u{1F94A}\u{1F4A5}'), 'Here is my high kick!');
+  assert.equal(stripAvatarTags('\u{1F483}\u{1F57A}'), ''); // woman+man dancing -> nothing
+  assert.equal(stripAvatarTags('[pose:ready] Ready stance \u{1F4AA}'), 'Ready stance');
+  assert.equal(stripAvatarTags('A \u{1F1FA}\u{1F1F8} flag here'), 'A flag here');
+});
+
 test('mid-sentence tags are removed without breaking the sentence', () => {
   assert.equal(stripAvatarTags('Here is the plan [nod] and the next step'), 'Here is the plan and the next step');
   assert.equal(stripAvatarTags('First thing [wave] second thing'), 'First thing second thing');
@@ -67,6 +87,15 @@ test('protectAvatarTags: underscored exercise tags survive cleanup, unknown brac
   assert.equal([...new Set(guardedLong.guarded.match(/[\uE000-\uF8FF]/g) || [])].length, 1);
 });
 
+// A real LLM reply (from the 2026-10-03 voice session): three moves in one
+// sentence, the middle two using invented prefixes, decorated with emoji.
+test('real karate reply: all three moves survive as cues, TTS hears only words', () => {
+  const reply = '[pose:ready] Here is my ready stance! [kick:highkick] Now let\'s perform a high kick! [block:block] And finish with a strong block! \u{1F94A}\u{1F4A5}';
+  const s = splitAvatarTags(reply);
+  assert.equal(s.spoken, 'Here is my ready stance! Now let\'s perform a high kick! And finish with a strong block!');
+  const found = [...s.cues.matchAll(/\[([a-z]+):([a-z]+)\]/g)].map(m => [m[1], m[2]]);
+  assert.deepEqual(found, [['pose', 'ready'], ['kick', 'highkick'], ['block', 'block']]);
+});
 
 test('plain text is untouched', () => {
   assert.equal(stripAvatarTags('Just a normal sentence.'), 'Just a normal sentence.');

@@ -538,6 +538,12 @@ function setCustomExpression(name, value = 1, holdMs = 3000) {
   S.custom[real] = { target: clamp(+value, 0, 1), until: now() + holdMs, cur: (S.custom[real] || {}).cur || 0 };
   emit("expression", { expression: real, value: +value });
 }
+// The voice model occasionally invents prefixes — it writes [kick:highkick] /
+// [block:block] where the vocabulary only has [pose:highkick] / [pose:block]
+// (the values themselves are real pose names). Normalise the invented
+// prefixes to pose so the intended move still plays; anything that matches no
+// pose stays a logged unknown, as before.
+const TAG_ALIAS = { kick: "pose", block: "pose" };
 function applyTags(tags) {
   for (const t of tags) {
     if (EMOTIONS.includes(t.name)) setEmotion(t.name, t.value ? parseFloat(t.value) : 0.85, 3000);
@@ -545,6 +551,7 @@ function applyTags(tags) {
     else if (t.name === "expr" && t.value) setCustomExpression(t.value, t.value2 ? parseFloat(t.value2) : 1, 3000);
     else if (t.name === "pose" && t.value) setPose(t.value, t.value2 ? parseFloat(t.value2) * 1000 : 3000);
     else if (t.name === "exercise" && t.value) setExercise(t.value, t.value2 ? parseFloat(t.value2) : 3);
+    else if (TAG_ALIAS[t.name] === "pose" && t.value) setPose(t.value, t.value2 ? parseFloat(t.value2) * 1000 : 3000);
     else log(`Ignored unknown tag [${t.name}]`);
   }
 }
