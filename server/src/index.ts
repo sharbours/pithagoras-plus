@@ -706,6 +706,13 @@ app.get("/api/sessions/:id/events", (req, res) => {
 const webDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../web/dist");
 if (existsSync(webDist)) {
   app.use(portalSecurityHeaders);
+  // The avatar page (and its unversioned JS/JSON) must never be served from a
+  // stale client cache: force a revalidate on every load so a new build is
+  // picked up without the device doing a manual hard refresh.
+  app.use((req, res, next) => {
+    if (req.path.startsWith("/avatar/")) { res.set("Cache-Control", "no-store"); return next(); }
+    next();
+  });
   app.use(express.static(webDist));
   app.get(/^(?!\/api).*/, (_req, res) => res.sendFile(path.join(webDist, "index.html")));
 }

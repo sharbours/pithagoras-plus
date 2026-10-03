@@ -9,6 +9,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import express, { type Router } from "express";
 import { getDb, getStoredSettings } from "../db.js";
+import { sanitizeSpeechText } from "../speech-sanitize.js";
 
 const DEFAULT_VAD = { positiveSpeechThreshold: 0.65, negativeSpeechThreshold: 0.35, minSpeechMs: 256, preSpeechPadMs: 320, redemptionMs: 1000 };
 export interface VoiceConfig {
@@ -188,7 +189,7 @@ export function voiceRouter(): Router {
     const settings = config();
     if (!settings.enabled) return res.status(409).json({ error: "Enable Voice in Settings → Add-ons first" });
     if (settings.runtime !== "audio-cpp") return res.status(501).json({ error: "Voice preview needs the Kokoro (audio-cpp) runtime" });
-    let text = typeof req.body?.text === "string" ? req.body.text.trim() : "";
+    let text = typeof req.body?.text === "string" ? sanitizeSpeechText(req.body.text) : "";
     if (!text) text = "Hi, this is how I sound with this voice.";
     if (text.length > 300) return res.status(400).json({ error: "Preview text must be 300 characters or fewer" });
     const voice = typeof req.body?.voice === "string" && /^[a-zA-Z0-9_-]{1,32}$/.test(req.body.voice) ? req.body.voice : "";
@@ -258,7 +259,13 @@ export function voiceRouter(): Router {
   router.post("/sessions/:id/voice/speech", async (req, res) => {
     const speechStarted=performance.now();
     let busyMs=0;
-    const text = req.body?.text;
+    // Emoji (read by name: 💥 → "collision symbol", 💃🕺 → "woman dancing, man
+    // dancing"), invisible characters, and unknown bracketed tags ([kick:…],
+    // [block:…]) are all stripped here, before any TTS engine can speak them.
+    const rawText = req.body?.text;
+    const text = typeof rawText === "string" ? sanitizeSpeechText(rawText) : undefined;
+    if (typeof rawText === "string" && rawText.trim() && typeof text === "string" && text !== rawText)
+      console.log(`[voice/speech] session=${req.params.id} sanitized: ${JSON.stringify(rawText.slice(0,80))} -> ${JSON.stringify(text.slice(0,80))}`);
     // Per-character Kokoro voice (Avatar Lab "Speaking voice"): a Kokoro voice id
     // (af_heart, am_adam, ...) or an OpenAI alias (coral, nova, ...). Validated
     // against a strict whitelist so a stray value can never alter the upstream

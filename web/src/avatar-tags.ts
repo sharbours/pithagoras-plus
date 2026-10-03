@@ -6,6 +6,13 @@
  * Only known names are treated as tags, so ordinary bracketed text ("[1]", "[sic]")
  * is left alone. The speech cues (laugh), (sigh), ... are not touched here: they still go
  * to TTS, and the avatar reacts to them itself.
+ *
+ * Any [word:…] segment is treated as a tag and removed: besides the known
+ * [pose:…] / [expr:…] / [exercise:…] prefixes, the model invents [kick:…],
+ * [block:…] and the like — those must never reach TTS (they would be read aloud
+ * as "kick, high kick"). Invented names are simply ignored by the avatar, and
+ * the portal's /voice/speech endpoint re-strips anything that slips through,
+ * so this is belt-and-braces, not the only line of defence.
  */
 const EMOTIONS = "neutral happy sad angry surprised relaxed thinking sleepy shy smirk pout squint shocked";
 const GESTURES = "nod shake tilt bounce wave bow shrug clap point think scratch cheer dance jump facepalm crossarms hips giggle stretch lookaround sigh wink lookup lookdown lookleft lookright backflip spin thumbsup peace ok fist openpalm fingerguns horns hearthands pirouette armwave disco raisetheroof groove phone";
@@ -13,11 +20,17 @@ const KNOWN = new Set(`${EMOTIONS} ${GESTURES}`.split(" "));
 const PREFIXED = new Set(["pose", "expr", "exercise"]);   // [pose:horse], [expr:HeartEyes:0.6], [exercise:deep_squat:3]
 const TAG = /\[([a-z]+)(?::([^\]\s:]{1,40}))?(?::([0-9.]+))?\]/gi;
 
-const isTag = (name: string, value?: string) => PREFIXED.has(name.toLowerCase()) ? !!value : KNOWN.has(name.toLowerCase());
+const isTag = (name: string, value?: string) => PREFIXED.has(name.toLowerCase())
+  ? !!value
+  : value !== undefined || KNOWN.has(name.toLowerCase());
 
-/** Remove avatar tags; tidy the spacing they leave behind. */
+/** Remove avatar tags and emoji (TTS would read them by name: 💥 → "collision"); tidy the spacing they leave behind. */
 export function stripAvatarTags(text: string): string {
-  return text.replace(TAG, (all, name, value) => (isTag(name, value) ? " " : all))
+  return text
+    .replace(/[\u0000-\u001F\u007F\u00AD\u034F\u061C\u1160\u17B4\u17B5\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g, "") // invisible / control chars
+    .replace(/\p{Extended_Pictographic}[\u{1F3FB}-\u{1F3FF}\uFE0F\u20E3]*/gu, " ") // emoji, incl. modifier + ZWJ sequences
+    .replace(/[\u2190-\u21FF\u2300-\u23FF\u2460-\u24FF\u25A0-\u25FF\u2600-\u26FF\u2700-\u27BF\u2B00-\u2BFF]/g, " ") // arrows, dingbats, geometric, misc symbols
+    .replace(TAG, (all, name, value) => (isTag(name, value) ? " " : all))
     .replace(/[ \t]{2,}/g, " ").replace(/[ \t]+([,.!?])/g, "$1").trim();
 }
 
