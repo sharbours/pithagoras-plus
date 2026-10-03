@@ -843,15 +843,29 @@ function setConversationState(s) {
   else if (S.target.emotion === "thinking") setEmotion("neutral", 1, 0, true);
 }
 /* Apply the tags in one spoken sentence, spread across its playback time. */
+// A pool of short "interacting" gestures. playCues runs once per spoken
+// sentence (the voice pipeline fires it when a sentence's audio starts), so at
+// the start of every PLAIN sentence — one with no explicit pose/exercise/gesture
+// tag — the avatar plays one of these at random, keeping it visibly alive while
+// it talks. A sentence that already carries an explicit tag is left to that tag
+// instead (the model's intent wins), so this never fights a commanded move.
+// Kept to quick, low-impact head/hand moves (~1–2 s) that blend with the idle
+// sway and breathing and don't read as a deliberate "performance".
+const INTERACT = ["nod", "tilt", "point", "wave", "wink"];
 function playCues(text, durationMs) {
   const src = String(text || "").replace(/\(laugh\)/gi, "[happy][giggle]").replace(/\(sigh\)/gi, "[sigh]").replace(/\((?:cough|clears throat)\)/gi, "[lookdown]");
   const segs = parseTagged(src), total = segs.reduce((n, s) => n + s.text.length, 0) || 1;
   const dur = durationMs > 0 ? durationMs : Math.max(800, total * 65);
-  let offset = 0;
+  let offset = 0, hasBodyTag = false;
   for (const seg of segs) {
-    if (seg.tags.length) { const delay = offset / total * dur; if (delay < 40) applyTags(seg.tags); else setTimeout(() => applyTags(seg.tags), delay); }
+    if (seg.tags.length) {
+      hasBodyTag = true;
+      const delay = offset / total * dur; if (delay < 40) applyTags(seg.tags); else setTimeout(() => applyTags(seg.tags), delay);
+    }
     offset += seg.text.length;
   }
+  // A plain spoken sentence (no tags at all) gets a random "interacting" beat.
+  if (!hasBodyTag) gesture(INTERACT[(Math.random() * INTERACT.length) | 0]);
 }
 function command(c) {
   if (c == null) return;
