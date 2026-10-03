@@ -293,7 +293,7 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
     };
     const play = async (playbackSignal: AbortSignal) => {
       playbackSignal.throwIfAborted();
-      const analyser = audio.createAnalyser(); analyser.fftSize = 256;
+      const analyser = audio.createAnalyser(); analyser.fftSize = 2048; // 23.4 Hz bins @48k — fine enough for tone/peak shape (was 256)
       analyser.connect(audio.destination);
       const samples = new Float32Array(analyser.fftSize);
       let animation = 0;

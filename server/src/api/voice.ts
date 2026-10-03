@@ -242,11 +242,11 @@ export function voiceRouter(): Router {
     try {
       const id = String(req.params.id);
       if (!/^[\w-]{1,80}$/.test(id)) return res.status(400).json({ error: "bad session id" });
-      const finding = req.body?.finding;
+      const finding = req.body?.finding as Record<string, unknown> | undefined;
       if (!finding || typeof finding !== "object" || finding.kind !== "tone")
         return res.status(400).json({ error: "finding required" });
       const keep = (v: unknown) => (typeof v === "number" || typeof v === "string" || typeof v === "boolean" || v === null) ? v : undefined;
-      const clean = {
+      const clean: Record<string, unknown> = {
         at: new Date().toISOString(),
         session: id,
         meanHz: keep(finding.meanHz),
@@ -257,7 +257,17 @@ export function voiceRouter(): Router {
         peakDb: keep(finding.peakDb),
         micRms: keep(finding.micRms),
         sampleRate: keep(finding.sampleRate),
+        fftSize: keep(finding.fftSize),
       };
+      if (Array.isArray(finding.spectrum)) {
+        const s = finding.spectrum;
+        if (s.length && s.every(v => typeof v === "number")) {
+          const sr = typeof finding.sampleRate === "number" ? finding.sampleRate : 0;
+          const ff = typeof finding.fftSize === "number" ? finding.fftSize : 0;
+          if (sr && ff) clean.spectrumHz = Math.round(sr / ff * 100) / 100; // Hz per bin
+          clean.spectrumDb = s; // dBFS per bin; index i = i*spectrumHz Hz
+        }
+      }
       const directory = path.join(process.env.DATA_DIR || "./data", "tone-watch");
       await fsMkdir(directory, { recursive: true });
       await fsAppend(path.join(directory, `tones-${id}.jsonl`), JSON.stringify(clean) + "\n");
