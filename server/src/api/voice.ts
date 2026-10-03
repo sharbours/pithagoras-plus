@@ -5,7 +5,7 @@ import { VoiceLeases } from '../extensions/voice-leases.js';
 import * as voiceService from '../extensions/voice-service.js';
 import { setTimeout as delay } from "node:timers/promises";
 import { once } from "node:events";
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir as fsMkdir, appendFile as fsAppend } from "node:fs/promises";
 import path from "node:path";
 import express, { type Router } from "express";
 import { getDb, getStoredSettings } from "../db.js";
@@ -232,6 +232,40 @@ export function voiceRouter(): Router {
       if(active)await leases.acquire(key);else await leases.release(key,config().lazyLoad!==false);
       res.json({managed:true});
     } catch(e){res.status(503).json({error:(e as Error).message});}
+  });
+  router.post("/sessions/:id/voice/tones", async (req, res) => {
+    // Diagnostic sink for the client-side ToneWatcher (web/src/tone-watch.ts):
+    // the browser reports a sustained narrowband high-frequency tone it heard
+    // in the playback path (the "even squeal while the avatar talks" symptom).
+    // Append-only JSONL in the data volume + server log, so an occurrence is
+    // captured even if the user was not at the computer.
+    try {
+      const id = String(req.params.id);
+      if (!/^[\w-]{1,80}$/.test(id)) return res.status(400).json({ error: "bad session id" });
+      const finding = req.body?.finding;
+      if (!finding || typeof finding !== "object" || finding.kind !== "tone")
+        return res.status(400).json({ error: "finding required" });
+      const keep = (v: unknown) => (typeof v === "number" || typeof v === "string" || typeof v === "boolean" || v === null) ? v : undefined;
+      const clean = {
+        at: new Date().toISOString(),
+        session: id,
+        meanHz: keep(finding.meanHz),
+        minHz: keep(finding.minHz),
+        maxHz: keep(finding.maxHz),
+        seenMs: keep(finding.seenMs),
+        ticks: keep(finding.ticks),
+        peakDb: keep(finding.peakDb),
+        micRms: keep(finding.micRms),
+        sampleRate: keep(finding.sampleRate),
+      };
+      const directory = path.join(process.env.DATA_DIR || "./data", "tone-watch");
+      await fsMkdir(directory, { recursive: true });
+      await fsAppend(path.join(directory, `tones-${id}.jsonl`), JSON.stringify(clean) + "\n");
+      console.log(`[voice/tones] session=${id} ${JSON.stringify(clean)}`);
+      res.json({ ok: true });
+    } catch (e) {
+      res.status(500).json({ error: (e as Error).message });
+    }
   });
   router.post("/sessions/:id/voice/transcribe", express.raw({ type: "audio/wav", limit: "12mb" }), async (req, res) => {
     if (!Buffer.isBuffer(req.body) || req.body.length < 44 || req.body.toString("ascii", 0, 4) !== "RIFF")

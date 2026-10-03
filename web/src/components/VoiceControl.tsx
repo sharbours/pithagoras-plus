@@ -12,6 +12,7 @@ import { api, type PortalEvent } from "../api";
 import type { Item } from "../transcript";
 import { LiveTranscription } from "../live-transcription";
 import { preparePcmSpeech, readPcmStream, playAudioBuffer } from "../pcm-stream";
+import { ToneWatcher } from "../tone-watch";
 import { samplesWav } from "../voice";
 import { HandsFreeVoice, type VoicePhase } from "../hands-free";
 import { splitAvatarTags, avatarCue } from "../avatar-tags";
@@ -301,18 +302,22 @@ export function VoiceControl({ canvasOpen, onCanvasMinimize, onCanvasToggle, ses
         levels.current.output = Math.min(1, Math.sqrt(samples.reduce((sum, value) => sum + value * value, 0) / samples.length) * 5);
         animation = requestAnimationFrame(meter);
       };
+      const toneWatcher = new ToneWatcher(audio, analyser, finding => {
+        fetch(`/api/sessions/${sessionId}/voice/tones`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ finding }) }).catch(() => {});
+      }, () => levels.current.input);
       try {
         const started = (scheduledAt=audio.currentTime) => {
           mark('playback_scheduled');
           const outputMs=(audio.baseLatency+(audio.outputLatency||0))*1000;
           mark('playback_estimate',{outputLatencyMs:outputMs},performance.now()+Math.max(0,scheduledAt-audio.currentTime)*1000+outputMs);
-          armMic(); meter();
+          armMic(); meter(); toneWatcher.start();
           avatarCue(cues, buffer ? buffer.duration * 1000 : 0);
         };
         if (speechStream) await speechStream.play(analyser, started);
         else await playAudioBuffer(buffer!, audio, analyser, playbackSignal, started);
       } finally {
         analyser.disconnect(); cancelAnimationFrame(animation); levels.current.output = 0;
+        toneWatcher.stop();
         disarmMic();
       }
     };

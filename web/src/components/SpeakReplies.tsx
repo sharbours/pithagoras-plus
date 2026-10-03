@@ -3,6 +3,7 @@ import { LuVolume2, LuVolumeX, LuLoaderCircle } from "react-icons/lu";
 import { api } from "../api";
 import type { Item } from "../transcript";
 import { speechChunks } from "../voice";
+import { ToneWatcher } from "../tone-watch";
 
 /**
  * Speaks new assistant replies out loud without a microphone.
@@ -221,6 +222,11 @@ export function SpeakReplies({
       const signal = abort.current.signal;
       busy.current = true;
       setSpeaking(true);
+      // Spectral tripwire on the playback path: catches a sustained
+      // narrowband high-frequency tone (the "squeal while talking" symptom)
+      // and reports it to the server, where the tone was verified clean.
+      let analyser: AnalyserNode | null = null;
+      let toneWatcher: ToneWatcher | null = null;
       try {
         for (const chunk of chunks) {
           signal.throwIfAborted();
@@ -228,7 +234,14 @@ export function SpeakReplies({
           const buffer = await synthesize(chunk, signal);
           const audio = context.current;
           if (audio && (audio.state as string) !== "closed") {
-            await playBuffer(buffer, audio, audio.destination, signal);
+            if (!analyser) {
+              analyser = audio.createAnalyser(); analyser.fftSize = 2048;
+              analyser.connect(audio.destination);
+              toneWatcher = new ToneWatcher(audio, analyser, finding => {
+                fetch(`/api/sessions/${sessionId}/voice/tones`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ finding }) }).catch(() => {});
+              }, () => 0);
+            }
+            await playBuffer(buffer, audio, analyser, signal);
           }
         }
       } catch (e) {
@@ -236,6 +249,8 @@ export function SpeakReplies({
           setError((e as Error)?.message || "Speech generation failed");
         }
       } finally {
+        toneWatcher?.stop();
+        analyser?.disconnect();
         busy.current = false;
         setSpeaking(false);
       }
