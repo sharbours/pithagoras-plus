@@ -564,6 +564,21 @@ function setCustomExpression(name, value = 1, holdMs = 3000) {
 // prefixes to pose so the intended move still plays; anything that matches no
 // pose stays a logged unknown, as before.
 const TAG_ALIAS = { kick: "pose", block: "pose" };
+// The local (llama) voice model sometimes invents a BARE tag word instead of the
+// required [exercise:NAME] form — e.g. it writes [guitar] / [strum] for the
+// guitar_playing clip, which has no value and would be silently dropped. Map the
+// bare words it actually invents to the one real clip they unambiguously name, so
+// the move still plays. Only high-confidence 1:1 words that match a real library
+// clip are listed (verified against library.js); anything else stays a logged
+// unknown — never a guess. The real fix is the prompt (AVATAR_INSTRUCTIONS in
+// voice-first.ts) teaching the full vocabulary; this is a safety net.
+const MOTION_ALIAS = { guitar: "guitar_playing", strum: "guitar_playing" };
+function aliasMotion(name, value) {
+  const key = String(name).toLowerCase().replace(/[\s-]+/g, "_");
+  if (MOTION_ALIAS[key]) return MOTION_ALIAS[key];
+  if (value) { const v = String(value).toLowerCase().replace(/[\s-]+/g, "_"); if (MOTION_ALIAS[v]) return MOTION_ALIAS[v]; }
+  return null;
+}
 function applyTags(tags) {
   for (const t of tags) {
     if (EMOTIONS.includes(t.name)) setEmotion(t.name, t.value ? parseFloat(t.value) : 0.85, 3000);
@@ -579,7 +594,13 @@ function applyTags(tags) {
       else log(`No motion called "${t.value}".`);
     }
     else if (TAG_ALIAS[t.name] === "pose" && t.value) setPose(t.value, t.value2 ? parseFloat(t.value2) * 1000 : 3000);
-    else log(`Ignored unknown tag [${t.name}]`);
+    else {
+      // Safety net for bare invented motion words (local model writes [guitar] for
+      // [exercise:guitar_playing]): if it names a real library clip, play it.
+      const aliased = aliasMotion(t.name, t.value);
+      if (aliased && EXERCISES && EXERCISES[aliased]) setExercise(aliased, t.value2 ? parseFloat(t.value2) : 3);
+      else log(`Ignored unknown tag [${t.name}]`);
+    }
   }
 }
 function stopSpeech() {

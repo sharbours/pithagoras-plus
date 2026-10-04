@@ -12,11 +12,14 @@
  * [block:…] and the like — those must never reach TTS (they would be read aloud
  * as "kick, high kick"). Invented names are simply ignored by the avatar, and
  * the portal's /voice/speech endpoint re-strips anything that slips through,
- * so this is belt-and-braces, not the only line of defence.
+ * so this is belt-and-braces, not the only line of defence. `guitar`/`strum`
+ * are real motion aliases (the local model writes a bare [guitar] for the
+ * guitar_playing clip); they are stripped from speech and the avatar plays the
+ * matching clip, so they are KNOWN here rather than just dropped.
  */
 const EMOTIONS = "neutral happy sad angry surprised relaxed thinking sleepy shy smirk pout squint shocked";
 const GESTURES = "nod shake tilt bounce wave bow shrug clap point think scratch cheer dance jump facepalm crossarms hips giggle stretch lookaround sigh wink lookup lookdown lookleft lookright backflip spin thumbsup peace ok fist openpalm fingerguns horns hearthands pirouette armwave disco raisetheroof groove phone";
-const KNOWN = new Set(`${EMOTIONS} ${GESTURES}`.split(" "));
+const KNOWN = new Set(`${EMOTIONS} ${GESTURES} guitar strum`.split(" "));
 const PREFIXED = new Set(["pose", "expr", "exercise"]);   // [pose:horse], [expr:HeartEyes:0.6], [exercise:deep_squat:3]
 const TAG = /\[([a-z]+)(?::([^\]\s:]{1,40}))?(?::([0-9.]+))?\]/gi;
 
