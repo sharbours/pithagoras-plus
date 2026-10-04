@@ -11,10 +11,12 @@ These are **not** part of the build; run them manually and re-run
 
 | Script | Target clip | What it does |
 |---|---|---|
+| `convert-one.mjs` | any single FBX | Converts one mixamo FBX to the library clip format and prints a per-bone raw-key motion profile (how to judge if it needs taming). Output: `out/<Name>.clip.json` — splice into `library.js`. |
 | `tame-guitar.mjs` | `guitar_playing` | legs locked (0.0), head/neck 0.3, torso 0.5, left arm 0.5, right arm 1.0; hips travel 0.5x. Makes the Mixamo "Guitar Playing" full-body performance read as a calm standing strum. |
 
 Usage (needs `three` — `npm i three` in a scratch dir; not a repo dep on purpose):
 
+    node tools/mixamo/convert-one.mjs /path/to/SomeMotion.fbx
     node tools/mixamo/tame-guitar.mjs /path/to/idle-animations/Guitar\ Playing.fbx
 
 Output: `out/guitar_tamed.clip.json` next to the script — splice its
