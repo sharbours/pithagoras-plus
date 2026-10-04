@@ -220,6 +220,16 @@ function exClip(name) {
   const q = dec(e.q), off = dec(e.off), B = EXERCISES._bones.length;
   return _exCache[name] = { frames: e.frames, q, off, B, bones: EXERCISES._bones, fps: EXERCISES._fps, pose: { rot: {}, off: [0, 0] } };
 }
+// Standing-pose rest: the avatar's default body state is one of the female
+// standing poses (standing_pose_1..12), held indefinitely. Every movement ends
+// back in one, and the idle state holds it (see the idle block + exercise
+// expiry below). The straight-ahead base is only ever the brief blend between
+// movements, never the resting pose.
+const STANDING = LIB_POSES ? Object.keys(LIB_POSES).filter(k => k.startsWith("standing_pose")) : [];
+function standingPose() {
+  if (active !== VrmAvatar || !VrmAvatar.ready() || !STANDING.length) return;
+  setPose(STANDING[(Math.random() * STANDING.length) | 0], Infinity);
+}
 function setExercise(name, loops = 3, overwrite = false) {
   const key = String(name).toLowerCase().replace(/[\s-]+/g, "_");
   if (key === "off" || key === "none") { S.exQ = []; if (S.exercise) S.exercise.until = Math.min(S.exercise.until, now()); return; }
@@ -1044,13 +1054,17 @@ function step(t, dt) {
   let tot = 0; for (const e of EMOTIONS) tot += S.w[e];
   for (const k of PKEYS) { let v = 0; for (const e of EMOTIONS) v += S.w[e] * P[e][k]; S.params[k] = v / (tot || 1); }
 
-  // idle behaviours
+  // idle behaviours: while idle and not speaking, the BODY rests in a standing
+  // pose (held indefinitely; re-asserted here so it comes back after any held
+  // pose or movement lapses) — never the straight-ahead default. Head/face
+  // micro-beats (glance, emote, gesture, hum, yawn) still run over the held
+  // stance and blend out on top of it.
   if (S.mode === "idle" && !S.speaking && t > S.nextIdle) {
-    const a = weighted({ glance: 4, emote: 4, gesture: 2.2, mixamo: LIB_IDLE.length ? 2 : 0, hum: 1, yawn: .5, rest: 2 });
+    if (active === VrmAvatar && STANDING.length) setPose(STANDING[(Math.random() * STANDING.length) | 0], Infinity);
+    const a = weighted({ glance: 4, emote: 4, gesture: 2.2, hum: 1, yawn: .5, rest: 2 });
     if (a === "glance") S.glance = { x: rand(-.9, .9), y: rand(-.55, .45), until: t + rand(700, 2600) };
     if (a === "emote") setEmotion(weighted({ happy: 3, relaxed: 2, thinking: 2, surprised: 1, shy: 1, sleepy: .7, sad: .4, angry: .25 }), rand(.45, .9), rand(1800, 4200));
-    if (a === "gesture") gesture(weighted({ tilt: 3, nod: 2, bounce: 1.2, lookaround: 1.2, wave: .6, shrug: .6, scratch: .5, think: .5, sigh: .35, shake: .3, clap: .25, cheer: .2, point: .2, dance: .15, jump: .15, facepalm: .15, bow: .1, stretch: .3, giggle: .3, hips: .25, crossarms: .15, backflip: .05, spin: .05, groove: .15, armwave: .08, raisetheroof: .06, disco: .05, pirouette: .04 }));
-    if (a === "mixamo" && LIB_IDLE.length) { const k = LIB_IDLE[(Math.random() * LIB_IDLE.length) | 0], clip = exClip(k); if (clip) startExercise(clip, k, 1); }
+    if (a === "gesture") gesture(weighted({ tilt: 3, nod: 2, bounce: 1.2, lookaround: 1.2, wave: .6, shrug: .6, scratch: .5, think: .5, sigh: .35, shake: .3, clap: .25, cheer: .2, point: .2, facepalm: .15, giggle: .3, hips: .25, crossarms: .15, armwave: .08, raisetheroof: .06, disco: .05 }));
     if (a === "hum") { S.humUntil = t + rand(1200, 2200); setEmotion("relaxed", .6, 2400); }
     if (a === "yawn") { setEmotion("sleepy", .85, 2800); S.yawn = { t0: t + 300, dur: 2000 }; }
     S.nextIdle = t + rand(1800, 5200);
@@ -1120,6 +1134,7 @@ function step(t, dt) {
       S.exercise = null;
       const next = (S.exQ || []).shift();             // a queued clip from the same cue batch: play it next
       if (next) startExercise(next.clip, next.key, next.loops);
+      else if (active === VrmAvatar) standingPose();  // every movement ends in a held standing pose
     }
     else { Q.pose = exercisePose(ex, t); Q.poseW = w; Q.poseMask = ex.noArms ? "noarms" : null; Q.poseFrom = null; }
   }
@@ -1530,6 +1545,7 @@ const VrmAvatar = (() => {
         geomBottom = Math.min(0, bb.min.y);
         frame();
         resolve(v);
+        standingPose();   // resting body state: a held female standing pose (not the straight-ahead default)
       }, err => { restore(); lastLoad = { failed, texErrors, fatal: (err && err.message) || String(err) };
         reject(err instanceof Error ? err : new Error("Couldn't read this file as a VRM model.")); });
     });
