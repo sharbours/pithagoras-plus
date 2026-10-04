@@ -230,6 +230,39 @@ function standingPose() {
   if (active !== VrmAvatar || !VrmAvatar.ready() || !STANDING.length) return;
   setPose(STANDING[(Math.random() * STANDING.length) | 0], Infinity);
 }
+// Fuzzy category fallback: small LLMs occasionally invent a motion key for a
+// whole category ("ballet_moves", "dance_moves") instead of naming a real one.
+// Route such an invented key to a RANDOM REAL key from that category so the
+// user sees a real motion instead of nothing. Only fires for unknown keys —
+// real keys never reach here. Returns a real key (or null).
+function fallbackMotion(key) {
+  const k = key.toLowerCase();
+  // KARATE pack split: src "Preset_Ballet NN" = ballet (20), src "Preset_Pose NN" = martial (21)
+  const ballet = Object.keys(KARATE).filter(x => /ballet/i.test(KARATE[x].src || ""));
+  const martial = Object.keys(KARATE).filter(x => !/ballet/i.test(KARATE[x].src || ""));
+  const pick = a => a[(Math.random() * a.length) | 0];
+  if (k.includes("ballet") && ballet.length) return pick(ballet);
+  if (k.includes("dance")) { const d = Object.keys(EXERCISES || {}).filter(x => x.includes("dance")); if (d.length) return pick(d); }
+  if (/(karate|martial|stance|fight|kick|block|kata|judo|taek|wushu)/.test(k) && martial.length) return pick(martial);
+  if (/(standing|stand|pose)/.test(k) && STANDING.length) return pick(STANDING);
+  return null;
+}
+// Central dispatcher for a motion key: a real exercise clip, else a real
+// pose, else the fuzzy category fallback (see fallbackMotion). opts:
+// { hold?: ms (for poses, default 3000), mask?: string (e.g. "legs") }.
+function playMotion(name, loops = 3, overwrite = false, opts) {
+  const hold = opts && opts.hold;
+  const key = String(name).toLowerCase().replace(/[\s-]+/g, "_");
+  if (key === "off" || key === "none") return;
+  if (EXERCISES[key] && !key.startsWith("_")) return setExercise(key, loops, overwrite);
+  if (resolvePose(key)) return setPose(key, hold ?? 3000, opts && opts.mask ? { mask: opts.mask } : undefined);
+  const fb = fallbackMotion(key);
+  if (fb) { log(`No motion "${name}" in the library — playing "${fb}" instead.`);
+    if (EXERCISES[fb] && !fb.startsWith("_")) return setExercise(fb, loops, overwrite);
+    if (resolvePose(fb)) return setPose(fb, 3000);
+  }
+  log(`No motion called "${name}".`);
+}
 function setExercise(name, loops = 3, overwrite = false) {
   const key = String(name).toLowerCase().replace(/[\s-]+/g, "_");
   if (key === "off" || key === "none") { S.exQ = []; if (S.exercise) S.exercise.until = Math.min(S.exercise.until, now()); return; }
@@ -594,16 +627,10 @@ function applyTags(tags) {
     if (EMOTIONS.includes(t.name)) setEmotion(t.name, t.value ? parseFloat(t.value) : 0.85, 3000);
     else if (GESTURES[t.name]) gesture(t.name);
     else if (t.name === "expr" && t.value) setCustomExpression(t.value, t.value2 ? parseFloat(t.value2) : 1, 3000);
-    else if (t.name === "pose" && t.value) setPose(t.value, t.value2 ? parseFloat(t.value2) * 1000 : 3000);
-    else if (t.name === "exercise" && t.value) setExercise(t.value, t.value2 ? parseFloat(t.value2) : 3);
-    else if ((t.name === "mixamo" || t.name === "dance") && t.value) {
-      const key = String(t.value).toLowerCase().replace(/[\s-]+/g, "_");
-      const loops = t.value2 ? parseFloat(t.value2) : 1;
-      if (EXERCISES && EXERCISES[key]) setExercise(key, loops, true);
-      else if (LIB_POSES && LIB_POSES[key]) setPose(key, 3000);
-      else log(`No motion called "${t.value}".`);
-    }
-    else if (TAG_ALIAS[t.name] === "pose" && t.value) setPose(t.value, t.value2 ? parseFloat(t.value2) * 1000 : 3000);
+    else if (t.name === "pose" && t.value) playMotion(t.value, 3, false, { hold: t.value2 ? parseFloat(t.value2) * 1000 : 3000 });
+    else if (t.name === "exercise" && t.value) playMotion(t.value, t.value2 ? parseFloat(t.value2) : 3, true);
+    else if ((t.name === "mixamo" || t.name === "dance") && t.value) playMotion(t.value, t.value2 ? parseFloat(t.value2) : 1, true, { hold: 4000 });
+    else if (TAG_ALIAS[t.name] === "pose" && t.value) playMotion(t.value, 3, false, { hold: t.value2 ? parseFloat(t.value2) * 1000 : 3000 });
     else {
       // Safety net: a bare tag that names a real library pose ([standing_pose])
       // plays it directly — same as [pose:standing_pose].
@@ -962,16 +989,11 @@ function command(c) {
   if (c.emotion) setEmotion(c.emotion, c.intensity ?? 0.85, c.hold ?? 4000, true);
   if (c.gesture) [].concat(c.gesture).forEach(gesture);
   if (c.expression) setCustomExpression(c.expression, c.value ?? 1, c.hold ?? 3000);
-  if (c.pose) { const k = String(c.pose).toLowerCase().replace(/[\s-]+/g, "_"); if (resolvePose(k)) setPose(c.pose, c.hold ?? 3000); else if (EXERCISES[k]) setExercise(k, c.loops ?? 1, true); }
-  if (c.motion) setExercise(String(c.motion).toLowerCase().replace(/[\s-]+/g, "_"), c.loops ?? 1, true);
-  if (c.exercise) setExercise(c.exercise, c.loops ?? 3, true);
+  if (c.pose) playMotion(c.pose, c.loops ?? 1, false, { hold: c.hold ?? 3000 });
+  if (c.motion) playMotion(c.motion, c.loops ?? 1, true);
+  if (c.exercise) playMotion(c.exercise, c.loops ?? 3, true);
   // mixamo library: one key for the whole motion set (clips + static poses)
-  if (c.mixamo || c.dance) {
-    const key = String(c.mixamo || c.dance).toLowerCase().replace(/[\s-]+/g, "_");
-    if (EXERCISES[key]) setExercise(key, c.loops ?? 3, true);
-    else if (resolvePose(key)) setPose(key, c.hold ?? 4000);
-    else log(`No "${c.mixamo || c.dance}" in the motion library.`);
-  }
+  if (c.mixamo || c.dance) playMotion(c.mixamo || c.dance, c.loops ?? 3, true, { hold: c.hold ?? 4000 });
   if (c.state) setConversationState(c.state);
   if (c.cues) playCues(c.cues, c.durationMs);
   if (c.look) S.lookOverride = { x: clamp(+c.look.x || 0, -1, 1), y: clamp(+c.look.y || 0, -1, 1), until: now() + (c.look.hold ?? 2000) };
