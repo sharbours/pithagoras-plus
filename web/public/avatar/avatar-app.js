@@ -595,6 +595,12 @@ function applyTags(tags) {
     }
     else if (TAG_ALIAS[t.name] === "pose" && t.value) setPose(t.value, t.value2 ? parseFloat(t.value2) * 1000 : 3000);
     else {
+      // Safety net: a bare tag that names a real library pose ([standing_pose])
+      // plays it directly — same as [pose:standing_pose].
+      if (LIB_POSES && LIB_POSES[String(t.name).toLowerCase().replace(/[\s-]+/g, "_")]) {
+        setPose(t.name, 3000);
+        continue;
+      }
       // Safety net for bare invented motion words (local model writes [guitar] for
       // [exercise:guitar_playing]): if it names a real library clip, play it.
       const aliased = aliasMotion(t.name, t.value);
@@ -946,7 +952,7 @@ function command(c) {
   if (c.emotion) setEmotion(c.emotion, c.intensity ?? 0.85, c.hold ?? 4000, true);
   if (c.gesture) [].concat(c.gesture).forEach(gesture);
   if (c.expression) setCustomExpression(c.expression, c.value ?? 1, c.hold ?? 3000);
-  if (c.pose) { const k = String(c.pose).toLowerCase().replace(/[\s-]+/g, "_"); if (KARATE[k]) setPose(c.pose, c.hold ?? 3000); else setExercise(c.pose, c.loops ?? 1, true); }
+  if (c.pose) { const k = String(c.pose).toLowerCase().replace(/[\s-]+/g, "_"); if (resolvePose(k)) setPose(c.pose, c.hold ?? 3000); else if (EXERCISES[k]) setExercise(k, c.loops ?? 1, true); }
   if (c.motion) setExercise(String(c.motion).toLowerCase().replace(/[\s-]+/g, "_"), c.loops ?? 1, true);
   if (c.exercise) setExercise(c.exercise, c.loops ?? 3, true);
   // mixamo library: one key for the whole motion set (clips + static poses)
