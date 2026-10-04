@@ -493,7 +493,7 @@ const S = {
   blink: 0, blinkT: 0, nextBlink: now() + 1500, doubleBlink: false,
   mouth: 0, viseme: "aa", syllOpen: false, nextSyll: 0, mouthTarget: 0,
   speaking: false, humUntil: 0, yawn: null,
-  gestures: [], exQ: [], nextIdle: now() + 1500, mic: 0,
+  gestures: [], exQ: [], nextIdle: now() + 1500, nextIdlePose: now() + 4500, mic: 0,
   params: { ...P.neutral }, pose: {},
 };
 
@@ -539,7 +539,7 @@ function setMode(m) {
   $("#modeHint").textContent = S.mode === "idle"
     ? "Idle: the character glances around, blinks and emotes on its own."
     : "LLM-driven: only commands change the expression. Blinking and breathing continue.";
-  S.glance = null; S.nextIdle = now() + 1200;
+  S.glance = null; S.nextIdle = now() + 1200; S.nextIdlePose = now() + rand(3000, 6000);
   emit("mode", { mode: S.mode });
 }
 
@@ -1054,20 +1054,26 @@ function step(t, dt) {
   let tot = 0; for (const e of EMOTIONS) tot += S.w[e];
   for (const k of PKEYS) { let v = 0; for (const e of EMOTIONS) v += S.w[e] * P[e][k]; S.params[k] = v / (tot || 1); }
 
-  // idle behaviours: while idle and not speaking, the BODY rests in a standing
-  // pose (held indefinitely; re-asserted here so it comes back after any held
-  // pose or movement lapses) — never the straight-ahead default. Head/face
-  // micro-beats (glance, emote, gesture, hum, yawn) still run over the held
-  // stance and blend out on top of it.
-  if (S.mode === "idle" && !S.speaking && t > S.nextIdle) {
-    if (active === VrmAvatar && STANDING.length) setPose(STANDING[(Math.random() * STANDING.length) | 0], Infinity);
-    const a = weighted({ glance: 4, emote: 4, gesture: 2.2, hum: 1, yawn: .5, rest: 2 });
-    if (a === "glance") S.glance = { x: rand(-.9, .9), y: rand(-.55, .45), until: t + rand(700, 2600) };
-    if (a === "emote") setEmotion(weighted({ happy: 3, relaxed: 2, thinking: 2, surprised: 1, shy: 1, sleepy: .7, sad: .4, angry: .25 }), rand(.45, .9), rand(1800, 4200));
-    if (a === "gesture") gesture(weighted({ tilt: 3, nod: 2, bounce: 1.2, lookaround: 1.2, wave: .6, shrug: .6, scratch: .5, think: .5, sigh: .35, shake: .3, clap: .25, cheer: .2, point: .2, facepalm: .15, giggle: .3, hips: .25, crossarms: .15, armwave: .08, raisetheroof: .06, disco: .05 }));
-    if (a === "hum") { S.humUntil = t + rand(1200, 2200); setEmotion("relaxed", .6, 2400); }
-    if (a === "yawn") { setEmotion("sleepy", .85, 2800); S.yawn = { t0: t + 300, dur: 2000 }; }
-    S.nextIdle = t + rand(1800, 5200);
+  // idle behaviours: the BODY rests in a held standing pose and keeps it ~10-15s
+  // before switching to another one; small face/head beats (glance, emote,
+  // hum, yawn) mix in every ~7s and play on top of the held pose. Never the
+  // straight-ahead default.
+  if (S.mode === "idle" && !S.speaking) {
+    if (t > S.nextIdlePose && active === VrmAvatar && STANDING.length) {
+      const s = S.stance && S.stance.name;
+      if (!s || s.startsWith("standing_pose")) {   // don't clobber an explicit held pose (e.g. [pose:horse]); it reverts to standing on its own when it lapses
+        setPose(STANDING[(Math.random() * STANDING.length) | 0], Infinity);   // a new standing pose, held
+        S.nextIdlePose = t + rand(10000, 15000);
+      }
+    }
+    if (t > S.nextIdle) {
+      const a = weighted({ glance: 4, emote: 4, hum: 1, yawn: .5 });
+      if (a === "glance") S.glance = { x: rand(-.9, .9), y: rand(-.55, .45), until: t + rand(700, 2600) };
+      if (a === "emote") setEmotion(weighted({ happy: 3, relaxed: 2, thinking: 2, surprised: 1, shy: 1, sleepy: .7, sad: .4, angry: .25 }), rand(.45, .9), rand(1800, 4200));
+      if (a === "hum") { S.humUntil = t + rand(1200, 2200); setEmotion("relaxed", .6, 2400); }
+      if (a === "yawn") { setEmotion("sleepy", .85, 2800); S.yawn = { t0: t + 300, dur: 2000 }; }
+      S.nextIdle = t + rand(5500, 8500);   // small beats ~7s; the body pose changes on its own slower timer above
+    }
   }
 
   // blinking
