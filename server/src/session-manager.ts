@@ -4,6 +4,7 @@ import type { PersonRow, Role } from "./people.js";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { PiClient } from "./pi/types.js";
+import { applyMood } from "./pi/mood.js";
 import { findServerBuiltin, runBuiltin } from "./pi/builtins.js";
 import { dropMessage, SessionEditError, type Scope } from "./pi/session-edit.js";
 import { buildExecutor, type Executor, type ExecutorKind } from "./executors/index.js";
@@ -403,7 +404,11 @@ class SessionManager extends EventEmitter {
     }
 
     if (!isCommand) this.record(sessionId, "portal_prompt", { message, ...(options?.voice ? { voice: true } : {}) });
-    await client.prompt(message, options);
+    // A mood is a per-session persona folded into the message itself (like the
+    // voice [Audio mode] wrapper the client adds next), so it changes the
+    // agent's tone without rebuilding the model runtime and applies on the
+    // very next turn. "default"/null is a no-op — the text is unchanged.
+    await client.prompt(applyMood(message, getSession(sessionId)?.mood), options);
     // A slash command completes inside prompt() without ever starting an agent
     // turn, so no agent_settled arrives to clear the status. Settle it here
     // rather than leaving "working" on screen forever. Asking pi rather than

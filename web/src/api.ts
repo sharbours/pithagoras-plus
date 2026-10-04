@@ -15,6 +15,8 @@ export interface Session {
   provider: string | null;
   model: string | null;
   thinking_level: string | null;
+  /** The conversation mood (persona) this session uses; null = default. */
+  mood: string | null;
   /** How the session came to exist. */
   kind?: "task" | "agent" | "routine";
 }
@@ -563,6 +565,8 @@ export interface PiState {
   thinkingLevel: string;
   autoCompactionEnabled?: boolean;
   messageCount?: number;
+  /** The conversation mood (persona) this session uses; "default" = none. */
+  mood?: string;
 }
 
 export interface PiConfig {
@@ -586,6 +590,8 @@ export interface ConfigPatch {
   thinkingLevel?: string;
   autoCompaction?: boolean;
   autoRetry?: boolean;
+  /** The conversation mood (persona); "default" clears it. Never boots pi. */
+  mood?: string;
 }
 
 

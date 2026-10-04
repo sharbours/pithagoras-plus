@@ -50,6 +50,11 @@ export interface SessionRow {
   last_person_key: string | null;
   /** May this session drive the agent's browser? Off unless turned on. */
   browser: number;
+  /**
+   * The conversation "mood" — a persona the agent adopts for this session.
+   * "default" (or null) means none. Folded into every message, not the model.
+   */
+  mood: string | null;
 }
 
 export interface EventRow {
@@ -86,7 +91,8 @@ export function getDb(): Database.Database {
       kind TEXT NOT NULL DEFAULT 'task',
       channel_slug TEXT,
       channel_key TEXT,
-      routine_slug TEXT
+      routine_slug TEXT,
+      mood TEXT
     );
     -- The index on (channel_id, channel_key) is created in migrate(), not here.
     -- CREATE TABLE IF NOT EXISTS is a no-op against an existing table, so on an
@@ -334,6 +340,8 @@ function migrate(d: Database.Database): void {
   }
   if (!names.includes("channel_key")) d.exec("ALTER TABLE sessions ADD COLUMN channel_key TEXT");
   if (!names.includes("routine_slug")) d.exec("ALTER TABLE sessions ADD COLUMN routine_slug TEXT");
+  // The mood selector: which persona the agent adopts for this conversation.
+  if (!names.includes("mood")) d.exec("ALTER TABLE sessions ADD COLUMN mood TEXT");
   // The key already carries its channel's slug, so it is unique on its own.
   d.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_channel_key
             ON sessions(channel_key) WHERE channel_key IS NOT NULL`);
@@ -483,6 +491,7 @@ export function updateSession(
       | "thinking_level"
       | "pinned"
       | "pi_session_file"
+      | "mood"
     >
   >
 ): void {
