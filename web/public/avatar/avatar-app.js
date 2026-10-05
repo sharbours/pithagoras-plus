@@ -2189,7 +2189,7 @@ function fillKokoroVoices() {
     if (!sel) continue;
     const keep = sel.value; sel.innerHTML = "";
     for (const g of Object.keys(groups)) {
-      const og = document.createElement("optgroup"); og.label = { US: "US English", UK: "British English", JP: "Japanese", ZH: "Mandarin", ES: "Spanish", FR: "French", HI: "Hindi", IT: "Italian", PT: "Brazilian Portuguese" }[g] || g;
+      const og = document.createElement("optgroup"); og.label = { F: "Female", M: "Male", US: "US English", UK: "British English", JP: "Japanese", ZH: "Mandarin", ES: "Spanish", FR: "French", HI: "Hindi", IT: "Italian", PT: "Brazilian Portuguese" }[g] || g;
       for (const v of groups[g]) { const o = document.createElement("option"); o.value = v.id; o.textContent = v.t; og.appendChild(o); }
       sel.appendChild(og);
     }

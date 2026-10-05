@@ -1,65 +1,22 @@
-// Kokoro speaker voices available on the local TTS (pithagoras-kokoro, :7863).
-// Plain script (no modules) to match the page's other scripts. Static,
-// generated from the live server's /v1/voices on 2026-09-27 — the avatar page
-// is self-contained (no fetch, no auth), so the list ships with the page.
-// "g" groups the picker's optgroups; "id" is what the TTS adapter accepts
-// (a Kokoro id like af_heart, or an OpenAI alias like coral).
-// af_heart is the portal's default and the per-character default if unset.
-window.KOKORO_DEFAULT_VOICE = "af_heart";
+// TTS engine voices available on the local TTS backend.
+// The portal's TTS adapter currently runs the Qwen3-TTS 12Hz 1.7B-CustomVoice
+// engine (pithagoras-tts-adapter :7864 -> :7866), whose 9 preset speakers are
+// listed here. Static, generated from the engine's /v1/voices on 2026-10-05 —
+// the avatar page is self-contained (no fetch, no auth), so the list ships
+// with the page. "g" groups the picker's optgroups; "id" is what the TTS
+// adapter accepts (a Qwen3 speaker like vivian, or a legacy Kokoro id, which
+// the adapter still maps for backwards compatibility).
+// vivian is the portal's default and the per-character default if unset.
+window.KOKORO_DEFAULT_VOICE = "vivian";
 window.KOKORO_VOICES = [
-  { id: "af_heart",  g: "US", t: "US female · warm, natural (default)" },
-  { id: "af_aoede",  g: "US", t: "US female" },
-  { id: "af_bella",  g: "US", t: "US female · expressive" },
-  { id: "af_jessica",g: "US", t: "US female · energetic" },
-  { id: "af_kore",   g: "US", t: "US female" },
-  { id: "af_nicole", g: "US", t: "US female · friendly" },
-  { id: "af_nova",   g: "US", t: "US female · clear" },
-  { id: "af_river",  g: "US", t: "US female · calm" },
-  { id: "af_sarah",  g: "US", t: "US female · conversational" },
-  { id: "af_sky",    g: "US", t: "US female · neutral, versatile" },
-  { id: "af_alloy",  g: "US", t: "US female · balanced" },
-  { id: "am_adam",   g: "US", t: "US male · deep" },
-  { id: "am_michael",g: "US", t: "US male · clear" },
-  { id: "am_echo",   g: "US", t: "US male · neutral" },
-  { id: "am_eric",   g: "US", t: "US male · authoritative" },
-  { id: "am_fenrir", g: "US", t: "US male · distinctive" },
-  { id: "am_liam",   g: "US", t: "US male · conversational" },
-  { id: "am_onyx",   g: "US", t: "US male · rich" },
-  { id: "am_puck",   g: "US", t: "US male · expressive" },
-  { id: "am_santa",  g: "US", t: "US male · warm" },
-  { id: "bf_emma",   g: "UK", t: "UK female · clear, professional" },
-  { id: "bf_isabella",g:"UK", t: "UK female · warm" },
-  { id: "bf_alice",  g: "UK", t: "UK female · crisp" },
-  { id: "bf_lily",   g: "UK", t: "UK female · soft" },
-  { id: "bm_george", g: "UK", t: "UK male · authoritative" },
-  { id: "bm_lewis",  g: "UK", t: "UK male · smooth" },
-  { id: "bm_daniel", g: "UK", t: "UK male · calm" },
-  { id: "bm_fable",  g: "UK", t: "UK male · expressive" },
-  { id: "jf_alpha",  g: "JP", t: "Japanese female" },
-  { id: "jf_gongitsune",g:"JP", t: "Japanese female" },
-  { id: "jf_nezumi", g: "JP", t: "Japanese female" },
-  { id: "jf_tebukuro",g:"JP", t: "Japanese female" },
-  { id: "jm_kumo",   g: "JP", t: "Japanese male" },
-  { id: "zf_xiaobei",g:"ZH", t: "Mandarin female" },
-  { id: "zf_xiaoni", g: "ZH", t: "Mandarin female" },
-  { id: "zf_xiaoxiao",g:"ZH",t: "Mandarin female" },
-  { id: "zf_xiaoyi", g: "ZH", t: "Mandarin female" },
-  { id: "zm_yunjian",g:"ZH", t: "Mandarin male" },
-  { id: "zm_yunxi",  g: "ZH", t: "Mandarin male" },
-  { id: "zm_yunxia", g: "ZH", t: "Mandarin male" },
-  { id: "zm_yunyang",g:"ZH", t: "Mandarin male" },
-  { id: "ef_dora",   g: "ES", t: "Spanish female" },
-  { id: "em_alex",   g: "ES", t: "Spanish male" },
-  { id: "em_santa",  g: "ES", t: "Spanish male" },
-  { id: "ff_siwis",  g: "FR", t: "French female" },
-  { id: "hf_alpha",  g: "HI", t: "Hindi female" },
-  { id: "hf_beta",   g: "HI", t: "Hindi female" },
-  { id: "hm_omega",  g: "HI", t: "Hindi male" },
-  { id: "hm_psi",    g: "HI", t: "Hindi male" },
-  { id: "if_sara",   g: "IT", t: "Italian female" },
-  { id: "im_nicola", g: "IT", t: "Italian male" },
-  { id: "pf_dora",   g: "PT", t: "Brazilian Portuguese female" },
-  { id: "pm_alex",   g: "PT", t: "Brazilian Portuguese male" },
-  { id: "pm_santa",  g: "PT", t: "Brazilian Portuguese male" },
+  { id: "vivian",   g: "F", t: "Vivian · young female · bright, slightly edgy (default)" },
+  { id: "serena",   g: "F", t: "Serena · young female · warm, gentle" },
+  { id: "ono_anna", g: "F", t: "Ono Anna · Japanese female · playful, light, nimble" },
+  { id: "sohee",    g: "F", t: "Sohee · Korean female · warm, rich emotion" },
+  { id: "ryan",     g: "M", t: "Ryan · male · dynamic, strong rhythmic drive" },
+  { id: "aiden",    g: "M", t: "Aiden · American male · sunny, clear midrange" },
+  { id: "dylan",    g: "M", t: "Dylan · Beijing male · clear, natural" },
+  { id: "eric",     g: "M", t: "Eric · Chengdu male · lively, slightly husky" },
+  { id: "uncle_fu", g: "M", t: "Uncle Fu · seasoned male · low, mellow timbre" },
 ];
 window.KOKORO_LABELS = Object.fromEntries(window.KOKORO_VOICES.map(v => [v.id, v.t]));
