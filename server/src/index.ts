@@ -27,7 +27,6 @@ import {
   type WizardInput,
 } from "./agent-setup.js";
 import { sessions, EXECUTOR_KIND } from "./session-manager.js";
-import { isMoodKey } from "./pi/mood.js";
 import { authEnabled, checkPassword, isAuthed, issueCookie, requireAuth } from "./auth.js";
 import { packagesRouter } from "./api/packages.js";
 import { extensionsRouter } from "./api/extensions.js";
@@ -385,8 +384,13 @@ app.post("/api/sessions/:id/prompt", async (req, res) => {
   }
   try {
     // Returns as soon as pi accepts the prompt. The run continues server-side
-    // regardless of what this browser does next.
-    await sessions.prompt(session.id, message, { voice: req.body?.voice === true });
+    // regardless of what this browser does next. The persona (Personality) is
+    // user-authored text the client resolves per-avatar and ships with the
+    // prompt; it is folded into the message before it reaches the model.
+    await sessions.prompt(session.id, message, {
+      voice: req.body?.voice === true,
+      persona: typeof req.body?.persona === "string" ? req.body.persona : null,
+    });
     res.json({ ok: true, status: "running" });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
@@ -462,8 +466,6 @@ app.get("/api/sessions/:id/config", async (req, res) => {
           provider: session.provider || defaults.provider,
         },
         thinkingLevel: session.thinking_level || defaults.thinkingLevel,
-        // Stored on the row, not in pi — the mood is a message-level persona.
-        mood: session.mood || "default",
       },
       // Unknowable without the session open, and a made-up zero reads as
       // "empty context" rather than "not measured yet".
@@ -481,7 +483,7 @@ app.get("/api/sessions/:id/config", async (req, res) => {
       client.getModels(),
       client.getStats(),
     ]);
-    res.json({ live: true, state: { ...state, mood: session.mood || "default" }, thinking: { levels }, models: { models }, stats });
+    res.json({ live: true, state, thinking: { levels }, models: { models }, stats });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message });
   }
@@ -513,27 +515,27 @@ app.get("/api/sessions/:id/models", async (req, res) => {
 app.post("/api/sessions/:id/config", async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: "Not found" });
-  const { provider, modelId, thinkingLevel, autoCompaction, autoRetry, mood } = req.body ?? {};
+  const { provider, modelId, thinkingLevel, autoCompaction, autoRetry } = req.body ?? {};
   const applied: string[] = [];
-
-  // A mood is a message-level persona stored on the row — it never touches the
-  // model runtime, so it can be applied without (re)starting pi, and a mood-only
-  // change is a cheap write instead of a ~600ms model launch.
-  let moodValue = session.mood || "default";
-  if (typeof mood === "string") {
-    moodValue = isMoodKey(mood) ? mood : "default";
-    updateSession(session.id, { mood: moodValue === "default" ? null : moodValue });
-    applied.push("mood");
-  }
 
   const wantsModel = typeof modelId === "string" && modelId;
   const wantsThinking = typeof thinkingLevel === "string" && thinkingLevel;
   const wantsCompaction = typeof autoCompaction === "boolean";
   const wantsRetry = typeof autoRetry === "boolean";
   if (!(wantsModel || wantsThinking || wantsCompaction || wantsRetry)) {
-    // Mood-only change: nothing needs the running client.
-    const current = getSession(session.id)!;
-    return res.json({ ok: true, applied, state: { ...current, mood: current.mood || "default" } });
+    // Nothing to apply — a no-op config write; report the stored choice.
+    const row = getSession(session.id)!;
+    return res.json({
+      ok: true, applied,
+      state: {
+        model: {
+          id: row.model || getSettings().model || "default",
+          name: row.model || getSettings().model || "pi's default",
+          provider: row.provider || getSettings().provider,
+        },
+        thinkingLevel: row.thinking_level || getSettings().thinkingLevel,
+      },
+    });
   }
 
   try {
@@ -571,7 +573,7 @@ app.post("/api/sessions/:id/config", async (req, res) => {
     if (applied.includes("thinkingLevel")) patch.thinking_level = state.thinkingLevel;
     if (Object.keys(patch).length) updateSession(session.id, patch);
 
-    res.json({ ok: true, applied, state: { ...state, mood: moodValue } });
+    res.json({ ok: true, applied, state });
   } catch (e) {
     res.status(500).json({ error: (e as Error).message, applied });
   }

@@ -873,6 +873,7 @@ async function testKokoroVoice() {
     S.holdUntil = Math.min(S.holdUntil, now() + 2200);
     if (btn) { btn.disabled = false; btn.textContent = "Test Kokoro voice"; }
   };
+
   try {
     const req = () => fetch("/api/voice/preview", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, voice: KOKORO_VOICE() }) });
@@ -920,6 +921,164 @@ function syncKokoroVoice() {
   if (sv) sv.value = KOKORO_VOICE();
   if (pv) pv.value = KOKORO_VOICE();
 }
+
+
+/* ---------------------------------------------------------------- Personality
+   The way the agent talks to you, chosen per character from the options panel.
+   A personality is not a model and not a voice: it is a short block of persona
+   text folded into every message by the portal, so it changes the agent's tone
+   without rebuilding anything and takes effect on the very next message.
+   Two things are remembered, both in the shared (same-origin) localStorage the
+   web app reads directly:
+     avatarLab.personality.<charId> — which personality THIS character uses.
+       Per character, like the voice/position/size above, so every avatar
+       remembers its own choice — and any number of avatars can share the same
+       one (same key).
+     avatarLab.personalityDefs      — the personalities themselves, a shared
+       { key: { label, text } } map that the user can edit in a popup. Editing
+       one updates it for every avatar that uses it.
+   The web app (this portal) is same-origin, so it reads these keys straight
+   from localStorage at send time; the emit()/postMessage below only re-broadcast
+   the change so an already-open host page notices immediately. */
+const PERSONA_DEFAULTS = {
+  default: { label: "Default", text: "" },
+  helpful: {
+    label: "Helpful",
+    text:
+      "You are in a Helpful mood. Be warm, patient, and practical: give a clear, direct answer first, then offer one useful next step. Skip small talk and hedging; just be genuinely useful.",
+  },
+  playful: {
+    label: "Playful insults",
+    text:
+      "You are in a Playful insults mood. Tease the user lightly and good-naturedly with a witty, good-humored dig or joke, but ALWAYS still answer the question correctly and helpfully — the teasing is the seasoning, the answer is the meal. Never be mean, cruel, or insulting in a way that isn't playful.",
+  },
+  teacher: {
+    label: "Teacher",
+    text:
+      "You are in a Teacher mood. Explain things clearly and step by step, the way a patient teacher would: define terms, show the reasoning, check understanding, and encourage. Keep it conversational rather than lecturing.",
+  },
+};
+function personaDefs() {
+  let d = null;
+  try { d = JSON.parse(store.get("personalityDefs")); } catch {}
+  if (!d || typeof d !== "object") d = {};
+  // The built-in keys are always present (with their defaults until first
+  // edited); custom keys the user has added ride along.
+  for (const k of Object.keys(PERSONA_DEFAULTS)) if (!d[k] || typeof d[k] !== "object") d[k] = PERSONA_DEFAULTS[k];
+  return d;
+}
+function personaDefsSave(d) { try { store.set("personalityDefs", JSON.stringify(d)); } catch {} }
+// currentChar is declared later in this file (top-level `let`), so read it through
+// a guard: if this block's code ever runs before that line executes (the top-level
+// fillPersona() does), the TDZ ReferenceError is caught and we report "no character".
+function currentCharId() { try { return currentChar && currentChar.id; } catch { return null; } }
+function personaKey(id) { return (id || currentCharId()) ? "personality." + (id || currentCharId()) : null; }
+function personaKeyForChar() { return personaKey(); }
+function personaValue() {
+  const k = personaKeyForChar();
+  return (k ? store.get(k) : null) || "default";
+}
+function personaText() {
+  const k = personaValue();
+  if (!k || k === "default") return "";
+  const t = personaDefs()[k] && personaDefs()[k].text;
+  return typeof t === "string" ? t.trim() : "";
+}
+function setPersona(k) {
+  const key = personaKeyForChar();
+  if (!key) return;
+  store.set(key, k || "default");
+  // No global mirror: the per-character key is the sole source of truth. The
+  // host web app reads avatarLab.character + avatarLab.personality.<charId>
+  // directly, so there is nothing else to sync here.
+  syncPersona();
+  broadcastPersona();
+}
+function savePersonaText(text, label) {
+  const k = personaValue();
+  if (!k || k === "default") { log("Pick a personality other than Default first — Default has no text to edit."); return; }
+  const d = personaDefs();
+  d[k] = { label: (label != null ? String(label).trim() : d[k].label) || k, text: text == null ? "" : String(text) };
+  personaDefsSave(d);
+  syncPersona();
+  broadcastPersona();
+}
+/* Tell an already-open host page (the voice app) the persona changed, so it
+   picks it up on the next message without a reload. The web app also reads the
+   shared localStorage directly, so this is a hint, not the mechanism. */
+function broadcastPersona() {
+  const msg = { avatarEvent: "persona", character: currentCharId(), key: personaValue(), text: personaText() };
+  if (window.parent !== window) window.parent.postMessage(msg, "*");
+  try { bc && bc.postMessage(msg); } catch {}
+}
+/* Fill #persona (full page) and #pickPersona (in-stage picker) with every
+   known personality, keeping whichever the current character uses selected. */
+function fillPersona() {
+  for (const sel of [$("#persona"), $("#pickPersona")]) {
+    if (!sel) continue;
+    const keep = sel.value || personaValue();
+    sel.innerHTML = "";
+    for (const k of Object.keys(personaDefs())) {
+      const o = document.createElement("option");
+      o.value = k;
+      o.textContent = personaDefs()[k].label;
+      sel.appendChild(o);
+    }
+    if ([...sel.options].some(o => o.value === keep)) sel.value = keep;
+  }
+  const pe = $("#pickPersonaEdit");
+  if (pe) pe.title = `Edit the text of the selected personality (shared by every avatar that uses it)`;
+}
+/* Mirror the current character's personality into whichever controls exist. */
+function syncPersona() {
+  const v = personaValue();
+  for (const sel of [$("#persona"), $("#pickPersona")]) {
+    if (sel) {
+      // If the list is empty (first paint) build it now so the value sticks.
+      if (!sel.options.length) fillPersona();
+      if ([...sel.options].some(o => o.value === v)) sel.value = v;
+    }
+  }
+  // Reflect the current selection into the edit popup if it is open.
+  const pop = $("#personaPop");
+  if (pop && !pop.hidden) {
+    const k = personaValue();
+    if (k && k !== "default") {
+      const d = personaDefs()[k];
+      const ta = $("#personaText"); if (ta) ta.value = d.text || "";
+      const lb = $("#personaLabel"); if (lb) lb.value = d.label || k;
+    }
+  }
+}
+function openPersonaEdit() {
+  const pop = $("#personaPop"), ta = $("#personaText"), lb = $("#personaLabel"), hint = $("#personaPopHint");
+  if (!pop) return;
+  const k = personaValue();
+  if (!k || k === "default") {
+    if (hint) { hint.textContent = "Default has no text of its own. Pick a personality above first."; pop.hidden = false; }
+    return;
+  }
+  const d = personaDefs()[k];
+  if (ta) ta.value = d.text || "";
+  if (lb) lb.value = d.label || k;
+  if (hint) hint.textContent = `Editing “${d.label}” — shared by every avatar that uses this personality.`;
+  pop.hidden = false;
+  if (ta) ta.focus();
+}
+function closePersonaEdit() {
+  const pop = $("#personaPop");
+  if (pop) pop.hidden = true;
+}
+if ($("#persona")) $("#persona").onchange = e => setPersona(e.target.value);
+if ($("#pickPersona")) $("#pickPersona").onchange = e => setPersona(e.target.value);
+if ($("#pickPersonaEdit")) $("#pickPersonaEdit").onclick = openPersonaEdit;
+if ($("#personaEditBtn")) $("#personaEditBtn").onclick = openPersonaEdit;
+if ($("#personaPopSave")) $("#personaPopSave").onclick = () => {
+  savePersonaText($("#personaText") && $("#personaText").value, $("#personaLabel") && $("#personaLabel").value);
+  closePersonaEdit();
+};
+if ($("#personaPopCancel")) $("#personaPopCancel").onclick = closePersonaEdit;
+fillPersona();
 
 /* ---------------------------------------------------------------- command API */
 /* Host-app integration: conversation state, external lip-sync level, and timed tag cues. */
@@ -1764,6 +1923,7 @@ async function selectCharacter(id) {
     await applyCharacterBg(c.id);   // this character shows its own remembered backdrop
     syncPickBg();                   // keep the in-stage picker's Background <select> in step
     syncPickPose();                 // mirror framing/position/size into the picker controls
+    syncPersona();                  // this character's own personality -> the picker + host
     if (c.file) idbSet("characterFile", c.file);
     const m = c.kind === "vrm" && VrmAvatar.meta();
     $("#credit").textContent = c.credit || (m ? `${m.name || m.title || c.name}${m.authors ? " by " + m.authors.join(", ") : m.author ? " by " + m.author : ""}` : "");
@@ -1771,7 +1931,7 @@ async function selectCharacter(id) {
     const cc = $("#customChips"); cc.innerHTML = "";
     for (const n of customs) { const b = document.createElement("button"); b.className = "chip"; b.textContent = n; b.onclick = () => setCustomExpression(n, +$("#intensity").value, 3000); cc.appendChild(b); }
     $("#customWrap").hidden = !customs.length;
-    emit("character", { id: c.id, name: c.name, customExpressions: customs, voice: KOKORO_VOICE() });
+    emit("character", { id: c.id, name: c.name, customExpressions: customs, voice: KOKORO_VOICE(), persona: personaText() });
   } catch (e) {
     log(`Character load failed: ${e.message}`);
     alert(`Couldn't load ${c.name}.\n\n${e.message}`);

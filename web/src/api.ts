@@ -15,8 +15,6 @@ export interface Session {
   provider: string | null;
   model: string | null;
   thinking_level: string | null;
-  /** The conversation mood (persona) this session uses; null = default. */
-  mood: string | null;
   /** How the session came to exist. */
   kind?: "task" | "agent" | "routine";
 }
@@ -208,10 +206,10 @@ export const api = {
   renameSession: (id: string, title: string) =>
     json<Session>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
   deleteSession: (id: string) => json<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
-  prompt: (id: string, message: string, options?: { voice?: boolean }) =>
+  prompt: (id: string, message: string, options?: { voice?: boolean; persona?: string | null }) =>
     json<{ ok: true }>(`/api/sessions/${id}/prompt`, {
       method: "POST",
-      body: JSON.stringify({ message, ...(options?.voice ? { voice: true } : {}) }),
+      body: JSON.stringify({ message, ...(options?.voice ? { voice: true } : {}), ...(options?.persona ? { persona: options.persona } : {}) }),
     }),
   /** Removes a message and the agent's answer to it — from the agent's memory too. */
   deleteMessage: (id: string, seq: number) =>
@@ -565,8 +563,6 @@ export interface PiState {
   thinkingLevel: string;
   autoCompactionEnabled?: boolean;
   messageCount?: number;
-  /** The conversation mood (persona) this session uses; "default" = none. */
-  mood?: string;
 }
 
 export interface PiConfig {
@@ -590,8 +586,6 @@ export interface ConfigPatch {
   thinkingLevel?: string;
   autoCompaction?: boolean;
   autoRetry?: boolean;
-  /** The conversation mood (persona); "default" clears it. Never boots pi. */
-  mood?: string;
 }
 
 

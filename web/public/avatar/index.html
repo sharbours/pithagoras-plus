@@ -82,6 +82,19 @@ select{background:var(--chip);border:1px solid var(--line);border-radius:10px;pa
 .picker-actions{display:flex;gap:8px}
 .picker-actions .btn{padding:5px 10px;font-size:13px}
 .picker .hint{margin:0;font-size:12px;color:var(--muted);min-height:1em}
+.persona-row{display:flex;gap:8px;align-items:center}
+.persona-row select{flex:1;min-width:0}
+/* Personality edit popup: a centered card over the stage (works on the full
+   page and the embedded gear view alike). */
+.persona-pop{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:rgba(40,30,90,.35)}
+.persona-pop[hidden]{display:none}
+.persona-card{background:var(--bubble);border:1px solid var(--line);border-radius:14px;box-shadow:0 10px 40px rgba(20,10,40,.30);padding:18px 20px;width:min(520px,92vw);display:flex;flex-direction:column;gap:12px}
+.persona-card h3{margin:0;font-size:15px;color:var(--ink)}
+.persona-card .hint{margin:0;font-size:12px;color:var(--muted)}
+.persona-card textarea{width:100%;min-height:110px;resize:vertical;font:13px var(--font);color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px}
+.persona-card .row{display:flex;gap:8px;align-items:center}
+.persona-card .row label{display:flex;gap:8px;align-items:center;color:var(--muted);font-size:13px;flex:1}
+.persona-card .row input{flex:1}
 .badge{background:var(--bubble);border-radius:999px;padding:4px 12px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;gap:7px}
 .badge .pip{width:8px;height:8px;border-radius:50%;background:var(--muted)}
 .badge.live .pip{background:var(--live)}
@@ -206,6 +219,10 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
           <label>Character size <input type="range" id="pickScale" min="50" max="100" step="1" value="100" aria-label="Character size — shrinks the character, not the picture or background"> <span class="pick-scale-val" id="pickScaleVal">100%</span></label>
           <label>Background <select id="pickBg"></select></label>
           <label>Speaking voice <select id="pickVoice" aria-label="Speaking voice (Kokoro)"></select></label>
+          <div class="persona-row">
+            <label>Personality <select id="pickPersona" aria-label="Personality (how the agent talks)"></select></label>
+            <button class="btn" id="pickPersonaEdit" title="Edit this personality's text — shared by every avatar that uses it.">Edit text…</button>
+          </div>
           <div class="picker-actions">
             <button class="btn" id="pickTestVoice" title="Hear this character’s Kokoro voice (plays a short line through the portal’s TTS)">Test voice</button>
             <button class="btn" id="pickUploadBg">Upload image…</button>
@@ -275,6 +292,11 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
           <label>Speaking voice <select id="kokoroVoice" aria-label="Speaking voice (Kokoro)" style="max-width:190px"></select></label>
           <button class="btn" id="testKokoroBtn" title="Plays a short line through the portal's Kokoro TTS — the same voice this character gets in voice mode. The “Browser voice” test above never uses Kokoro.">Test Kokoro voice</button>
         </div>
+        <div class="row persona-row">
+          <label>Personality <select id="persona" aria-label="Personality (how the agent talks)"></select></label>
+          <button class="btn" id="personaEditBtn" title="Edit this personality's text — shared by every avatar that uses it. It changes how the agent talks, applied to your messages by the portal.">Edit text…</button>
+        </div>
+        <p class="hint" style="margin-top:0">“Personality” is how the agent talks to you. It is remembered per avatar (this character keeps its choice every time it is picked, and several avatars can share the same personality). “Edit text…” opens a popup where you change the personality's words — the change applies to your messages immediately and to every avatar using that personality.</p>
         <p class="hint" style="margin-top:0">“Speaking voice” is the Kokoro voice the portal’s TTS uses when this character talks in voice mode. It is remembered per character, so the choice sticks every time this avatar is picked. “Browser voice” only affects this page’s own demo speech — press “Test Kokoro voice” to actually hear the Kokoro voice (it needs your portal login the first time).</p>
         <div class="row">
           <label>Rate <input type="range" id="rate" min="0.6" max="1.6" step="0.05" value="1"></label>
@@ -316,6 +338,25 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
 <!-- three.js r169 (MIT) + @pixiv/three-vrm 3.x (MIT) + Basis Universal transcoder (Apache-2.0) + meshoptimizer decoder (MIT), bundled inline so the file works offline.
      Loaded lazily by avatar-app.js (ensureLibs) the first time a .vrm character is
      picked, so the built-in 2D character and the page itself load without the 1.7 MB 3D stack. -->
+
+<!-- Personality edit popup: the single place the user rewrites a personality's
+     text. It is shared by every avatar that uses that personality, and the
+     portal folds the text into your messages (see avatar-app.js "Personality"). -->
+<div class="persona-pop" id="personaPop" hidden>
+  <div class="persona-card">
+    <h3>Edit personality</h3>
+    <p class="hint" id="personaPopHint"></p>
+    <div class="row">
+      <label>Name <input type="text" id="personaLabel" maxlength="40" aria-label="Personality name"></label>
+    </div>
+    <textarea id="personaText" spellcheck="true" aria-label="Personality text" placeholder="Describe how the agent should talk to you…"></textarea>
+    <p class="hint">This text is placed in front of each message you send, so the agent reads it first. Leave it empty (or pick Default) for the normal voice.</p>
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn" id="personaPopCancel">Cancel</button>
+      <button class="btn primary" id="personaPopSave">Save</button>
+    </div>
+  </div>
+</div>
 
 <script src="avatar-app.js"></script>
 </body>

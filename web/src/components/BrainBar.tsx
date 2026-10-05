@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LuBrain, LuCpu, LuHeart, LuMessageSquare, LuSmile, LuGraduationCap } from "react-icons/lu";
+import { LuBrain, LuCpu } from "react-icons/lu";
 import { api, type Session } from "../api";
 import { CompactToggle } from "./CompactToggle";
 
@@ -28,40 +28,21 @@ const BRAINS = {
 type BrainKey = keyof typeof BRAINS;
 
 /**
- * Conversation "moods" — a per-session persona the agent adopts. A mood is not
- * a model: it does not route anywhere, it changes how the agent talks. The
- * server folds the chosen persona into every message (not the system prompt),
- * so switching it takes effect on the very next turn without restarting the
- * model, and it is stored on the session row so it survives a restart.
- *
- * "default" is the no-mood state — no persona block is injected at all.
- * Adding a mood here (and on the server in server/src/pi/mood.ts) is all it
- * takes; the selector renders whatever keys exist.
- */
-const MOODS = {
-  default: { label: "Default", Icon: LuMessageSquare },
-  helpful: { label: "Helpful", Icon: LuHeart },
-  playful: { label: "Playful insults", Icon: LuSmile },
-  teacher: { label: "Teacher", Icon: LuGraduationCap },
-} as const;
-
-type MoodKey = keyof typeof MOODS;
-const MOOD_ORDER: MoodKey[] = ["default", "helpful", "playful", "teacher"];
-
-/**
- * Front-page brain + mood switch.
+ * Front-page brain switch.
  *
  * Sits at the very top of the session workspace and is visible in BOTH text
  * and voice mode (the composer and header hide in voice mode, so anything
  * that only lives there would be unusable for a voice-first deployment).
  *
- * The Brain side is a two-state control: tap the brain you want and it
- * re-routes this session through the portal's setConfig path (provider +
- * modelId). The Mood side is a persona selector that writes to the same
- * setConfig route but changes only the message-level persona, so it never
- * restarts the model and applies immediately. The active choice is
- * highlighted; a green dot marks the local brain, an accent dot the remote
- * Hermes one, and a coloured dot the active mood.
+ * The control is a two-state switch: tap the brain you want and it re-routes
+ * this session through the portal's setConfig path (provider + modelId).
+ * The active choice is highlighted: a green dot marks the local brain, an
+ * accent dot the remote Hermes one.
+ *
+ * The former "Mood" selector has moved to the avatar options panel (the ⚙
+ * gear on the voice stage), renamed "Personality": a per-avatar persona the
+ * avatar's page stores and this app folds into every prompt it sends (see
+ * the personaRef in App.tsx).
  */
 export function BrainBar({ sessionId, session }: { sessionId: string; session: Session }) {
   // Seed from the session row for an immediate correct paint, then confirm via
@@ -69,11 +50,7 @@ export function BrainBar({ sessionId, session }: { sessionId: string; session: S
   const [active, setActive] = useState<BrainKey>(
     session.provider === "hermes" ? "hermes" : "local",
   );
-  const [mood, setMood] = useState<MoodKey>(
-    session.mood && (MOODS as any)[session.mood] ? (session.mood as MoodKey) : "default",
-  );
   const [busy, setBusy] = useState(false);
-  const [moodBusy, setMoodBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,8 +60,6 @@ export function BrainBar({ sessionId, session }: { sessionId: string; session: S
         if (cancelled) return;
         const prov: string = cfg?.state?.model?.provider ?? "";
         setActive(prov === "hermes" ? "hermes" : "local");
-        const m = cfg?.state?.mood;
-        if (m && (MOODS as any)[m]) setMood(m as MoodKey);
       })
       .catch(() => {});
     return () => {
@@ -92,13 +67,13 @@ export function BrainBar({ sessionId, session }: { sessionId: string; session: S
     };
   }, [sessionId]);
 
-  // If the session prop is refreshed (e.g. after a list update) adopt its mood
-  // so the control stays in step without needing its own fetch.
+  // If the session prop is refreshed (e.g. after a list update) adopt its
+  // provider so the control stays in step without needing its own fetch.
   useEffect(() => {
-    if (session.mood && (MOODS as any)[session.mood]) {
-      setMood(session.mood as MoodKey);
+    if (session.provider) {
+      setActive(session.provider === "hermes" ? "hermes" : "local");
     }
-  }, [session.mood]);
+  }, [session.provider]);
 
   const switchTo = async (target: BrainKey) => {
     if (target === active || busy) return;
@@ -113,21 +88,6 @@ export function BrainBar({ sessionId, session }: { sessionId: string; session: S
       // Leave the highlight where it is; the user can retry.
     } finally {
       setBusy(false);
-    }
-  };
-
-  const switchMood = async (target: MoodKey) => {
-    if (target === mood || moodBusy) return;
-    setMoodBusy(true);
-    // Update the highlight immediately — the change is cheap and local.
-    setMood(target);
-    try {
-      await api.setConfig(sessionId, { mood: target });
-    } catch {
-      // Revert on failure so the control never lies about state.
-      setMood(session.mood && (MOODS as any)[session.mood] ? (session.mood as MoodKey) : "default");
-    } finally {
-      setMoodBusy(false);
     }
   };
 
@@ -170,56 +130,6 @@ export function BrainBar({ sessionId, session }: { sessionId: string; session: S
           })}
         </div>
         {busy && <span className="text-[11px] text-fg-faint">switching…</span>}
-
-        {/* The mood selector sits right next to the brain switch — same row,
-            same visual weight — because it is the other per-session dial. */}
-        <span className="ml-2 text-[11px] font-medium uppercase tracking-wide text-fg-faint">Mood</span>
-        <div className="flex items-center gap-1 rounded-lg border border-line bg-surface p-0.5">
-          {MOOD_ORDER.map((k) => {
-            const m = MOODS[k];
-            const on = mood === k;
-            // Each mood gets its own active tint so a glance says which one is
-            // on; default is neutral since it means "no persona".
-            const onCls =
-              k === "default"
-                ? "bg-fg/10 text-fg-muted"
-                : k === "helpful"
-                  ? "bg-ok/12 text-ok"
-                  : k === "playful"
-                    ? "bg-warn/12 text-warn"
-                    : "bg-accent/12 text-accent";
-            return (
-              <button
-                key={k}
-                type="button"
-                disabled={moodBusy}
-                onClick={() => switchMood(k)}
-                title={m.label}
-                className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition disabled:opacity-50 ${
-                  on ? onCls : "text-fg-subtle hover:bg-fg/5 hover:text-fg-muted"
-                }`}
-              >
-                <m.Icon className="h-3.5 w-3.5" />
-                <span className={k === "playful" ? "hidden sm:inline" : undefined}>{m.label}</span>
-                <span
-                  className={`h-1.5 w-1.5 rounded-full ${
-                    on
-                      ? k === "default"
-                        ? "bg-fg-subtle"
-                        : k === "helpful"
-                          ? "bg-ok"
-                          : k === "playful"
-                            ? "bg-warn"
-                            : "bg-accent"
-                      : "bg-raised"
-                  }`}
-                  title={on ? "active" : "standby"}
-                />
-              </button>
-            );
-          })}
-        </div>
-        {moodBusy && <span className="text-[11px] text-fg-faint">setting…</span>}
 
         <div className="ml-auto flex items-center gap-1">
           <CompactToggle />

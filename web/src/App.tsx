@@ -3,6 +3,7 @@ import { appendLiveEvent, resetLiveEvents } from "./live-events";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { initCompact, isCompact, subscribeCompact } from "./compact-mode";
+import { personaText } from "./persona-store";
 import { api, type PortalEvent, type Session, type SessionStatus, type Workspace } from "./api";
 import { Sidebar } from "./components/Sidebar";
 import { Chat } from "./components/Chat";
@@ -399,7 +400,21 @@ function Shell({
               }
             }}
             onSend={async (msg, options) => {
-              await api.prompt(active.id, msg, options);
+              // The avatar options panel (the ⚙ gear on the voice stage) is the
+              // source of truth for "Personality": it stores a personality per
+              // avatar in the shared (same-origin) localStorage and several
+              // avatars may share the same one. This app is only a reader —
+              // resolve the active avatar's personality text fresh at send time
+              // (a pure read, so no state/hook) so an edit in the gear panel
+              // takes effect on the very next message with no refresh, and ship
+              // it with the prompt so the server can fold it into the message.
+              let persona: string | null = null;
+              try {
+                persona = personaText() || null;
+              } catch {
+                persona = null;
+              }
+              await api.prompt(active.id, msg, { ...options, persona });
               refreshSessions();
             }}
             onEditMessage={async (seq, message) => {
