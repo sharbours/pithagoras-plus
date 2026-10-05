@@ -47,25 +47,36 @@ sleep 3
 systemctl is-active qwen3-tts | grep -q active || { echo "qwen3-tts failed - check /var/log/qwen3-tts.log"; exit 1; }
 echo "   (model lazy-loads on first synthesis; VRAM rises then)"
 
-echo "== 4/4 swap adapter file + env, restart adapter container =="
+echo "== 4/4 swap adapter file + recreate adapter container with qwen3 env =="
+# NOTE: Docker 29 dropped `docker update -e`; env can only be changed by
+# re-running the container. The original was a docker-run (bind-mounted
+# adapter.py, host network) — recreate it with the same spec + qwen3 env.
 if [ ! -f "$NEW_ADAPTER" ]; then
   echo "missing $NEW_ADAPTER (run the Qwen3 setup first - QWEN3-README.md)"; exit 1
 fi
 [ -f "$AD_BAK" ] || cp -p "$AD_FILE" "$AD_BAK"
 cp "$NEW_ADAPTER" "$AD_FILE"
-docker update \
-  -e TTS_ENGINE=qwen3 \
-  -e KOKORO_UPSTREAM=http://127.0.0.1:$QWEN3_PORT \
+docker rm -f $ADAPTER >/dev/null 2>&1
+docker run -d --name $ADAPTER --network host --restart unless-stopped \
   -e KOKORO_VOICE=af_heart \
+  -e BIND=127.0.0.1 \
+  -e PORT=7864 \
+  -e KOKORO_UPSTREAM=http://127.0.0.1:$QWEN3_PORT \
+  -e TTS_ENGINE=qwen3 \
   -e VOICE_MAP="$VOICE_MAP" \
   -e QWEN_DEFAULT_VOICE=vivian \
-  $ADAPTER >/dev/null
-docker restart $ADAPTER >/dev/null
+  -v $AD_FILE:/app/adapter.py:ro \
+  python:3.12-slim python /app/adapter.py >/dev/null
 sleep 3
 echo "   adapter health:"
 curl -sk -m 10 http://127.0.0.1:7864/health; echo
 
 echo
+echo "== VERIFY: qwen3-tts actually listening (guard against silent misconfig) =="
+if ! curl -sk -m 10 http://127.0.0.1:$QWEN3_PORT/v1/voices | grep -q vivian; then
+  echo "FATAL: qwen3-tts not serving on :$QWEN3_PORT (check 'systemctl status qwen3-tts' + log)"; exit 1
+fi
+echo "   qwen3-tts serving on :$QWEN3_PORT"
 echo "== VERIFY: warm the model via the PROD adapter (:7864, voice af_heart->vivian) =="
 curl -sk -m 300 -o /tmp/cutover-warmup.pcm -w 'warmup http=%{http_code} bytes=%{size_download} wall=%{time_total}s\n' \
   -H 'Content-Type: application/json' \
