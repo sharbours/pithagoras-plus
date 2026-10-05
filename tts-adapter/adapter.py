@@ -1,16 +1,26 @@
 #!/usr/bin/env python3
-"""TTS adapter v2: Pithagoras portal Breeze-native JSON -> Kokoro OpenAI API.
+"""TTS adapter v2: Pithagoras portal Breeze-native JSON -> upstream OpenAI TTS API.
 
 v2 fixes (2026-09-18):
-- Request NON-STREAMING PCM from Kokoro (stream:false). The v1 stream:true path
-  received a chunked body whose framing bytes (hex size lines + CRLF, 0\r\n\r\n
+- Request NON-STREAMING PCM from the upstream (stream:false). The v1 stream:true
+  path received a chunked body whose framing bytes (hex size lines + CRLF, 0\r\n\r\n
   terminator) leaked into the "PCM" output -> burst of static in the browser
   -> "Network error". Non-streaming returns one clean Content-Length body.
 - Hardened decode: if the body looks chunked (leading hex-size line or trailing
   0\r\n\r\n) it is decoded even when the header doesn't say so.
 - Validates output (even length, no ASCII chunk markers, non-silent) before
   sending it on; sends X-Sample-Rate: 24000.
-- Logs every request to docker logs (v1 was silent -> hard to debug).
+- Logs every request to the container log (v1 was silent -> hard to debug).
+
+Upstream engine (build #61, 2026-10-05): by default the upstream is Kokoro
+(hwdsl2/kokoro-server, :7863, model "kokoro", voices af_heart/...). Setting
+TTS_ENGINE=qwen3 re-points it at a Qwen3-TTS OpenAI-compatible server
+(groxaxo/Qwen3-TTS-Openai-Fastapi, TTS_BACKEND=official, model "tts-1") which
+serves the same /v1/audio/speech contract and the same 16-bit LE PCM @ 24 kHz.
+Qwen3 has 9 preset speakers (Vivian/Serena/Sohee/...); VOICE_MAP (a JSON env
+string) maps the portal's Kokoro ids onto them, unmapped ids fall back to
+QWEN_DEFAULT_VOICE. With TTS_ENGINE=kokoro (the default) the adapter behaves
+exactly as before, so the same file serves both engines.
 
 Loopback-only, pure-stdlib. Raw-socket upstream because urllib/http.client
 triggers Kokoro's 401 header-parser quirk (see skill pithagoras-210-voice-llm).
@@ -27,6 +37,49 @@ VOICE = os.environ.get("KOKORO_VOICE", "af_heart")
 PORT = int(os.environ.get("PORT", "7864"))
 BIND = os.environ.get("BIND", "127.0.0.1")
 CHUNK = 65536
+
+# ---------------------------------------------------------------------------
+# Upstream engine (build #61 PoC: Qwen3-TTS 1.7B replaces Kokoro)
+#
+# TTS_ENGINE=kokoro (default, unchanged behavior) or TTS_ENGINE=qwen3.
+# The Qwen3-TTS OpenAI-compatible server (groxaxo/Qwen3-TTS-Openai-Fastapi,
+# TTS_BACKEND=official) speaks the same /v1/audio/speech contract as Kokoro
+# and returns identical 16-bit LE PCM @ 24 kHz, so this adapter's wire path
+# is unchanged; only the voice ids and the request "model" differ:
+#   - voice: the portal sends Kokoro ids (af_heart, ...). Qwen3 has 9 preset
+#     speakers (Vivian, Serena, Sohee, ...). VOICE_MAP (JSON, env) maps each
+#     Kokoro id to a Qwen speaker; unmapped ids fall back to QWEN_DEFAULT_VOICE.
+#   - model: Kokoro wants "kokoro"; the Qwen router wants "tts-1".
+# The mapping applies ONLY when TTS_ENGINE=qwen3, so a Kokoro deployment that
+# never sets it is byte-identical to the pre-#61 adapter.
+# ---------------------------------------------------------------------------
+ENGINE = os.environ.get("TTS_ENGINE", "kokoro").strip().lower()
+if ENGINE not in ("kokoro", "qwen3"):
+    print(f"WARNING: unknown TTS_ENGINE={ENGINE!r}; using kokoro", flush=True)
+    ENGINE = "kokoro"
+QWEN_DEFAULT_VOICE = os.environ.get("QWEN_DEFAULT_VOICE", "Vivian")
+
+def _load_voice_map():
+    raw = os.environ.get("VOICE_MAP", "")
+    if not raw:
+        return {}
+    try:
+        m = json.loads(raw)
+        return {str(k): str(v) for k, v in m.items()} if isinstance(m, dict) else {}
+    except ValueError as e:
+        print(f"WARNING: VOICE_MAP is not valid JSON ({e}); ignoring", flush=True)
+        return {}
+
+VOICE_MAP = _load_voice_map()
+
+def map_voice(voice):
+    """Map an incoming voice id to the upstream's speaker name.
+
+    kokoro engine: identity (the portal's Kokoro ids pass straight through).
+    qwen3 engine:  VOICE_MAP lookup, else QWEN_DEFAULT_VOICE."""
+    if ENGINE != "qwen3" or not voice:
+        return voice
+    return VOICE_MAP.get(voice, QWEN_DEFAULT_VOICE)
 
 # a hex chunk-size line: 1-8 hex digits + CRLF
 CHUNK_HEAD_RE = re.compile(rb"^[0-9a-fA-F]{1,8}\r\n")
@@ -64,11 +117,17 @@ VOICE_ID_RE = re.compile(r"[a-zA-Z0-9_-]{1,32}")
 
 
 def call_upstream(text, voice=""):
-    """Non-streaming POST to Kokoro over a raw socket. -> (status, headers, body).
+    """Non-streaming POST to the upstream TTS (Kokoro or Qwen3-TTS) over a raw
+    socket. -> (status, headers, body).
 
-    voice: an optional per-request Kokoro voice id; empty falls back to the
-    KOKORO_VOICE env default (so the global setting still works on its own)."""
-    body = json.dumps({"model": "kokoro", "input": text, "voice": voice or VOICE,
+    voice: an optional per-request voice id (Kokoro id, or Qwen speaker for a
+    qwen3 engine); empty falls back to the VOICE env default. The upstream
+    "model" and the voice value are engine-adjusted: the Qwen router wants
+    model "tts-1" and its preset speaker names, Kokoro wants "kokoro" and its
+    own ids. The raw-socket body is otherwise identical (same PCM contract)."""
+    eff_voice = map_voice(voice or VOICE)
+    model = "tts-1" if ENGINE == "qwen3" else "kokoro"
+    body = json.dumps({"model": model, "input": text, "voice": eff_voice,
                        "response_format": "pcm", "stream": False}).encode()
     req = (b"POST /v1/audio/speech HTTP/1.1\r\n"
            b"Host: " + U_HOST.encode() + b":" + str(U_PORT).encode() + b"\r\n"
@@ -134,8 +193,9 @@ class H(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.rstrip("/") in ("/health", ""):
-            self._send(200, json.dumps({"status": "ok", "engine": "kokoro-adapter-v2",
-                                       "upstream": UPSTREAM, "voice": VOICE}).encode())
+            self._send(200, json.dumps({"status": "ok", "engine": "tts-adapter-v2",
+                                       "upstream": UPSTREAM, "tts_engine": ENGINE,
+                                       "voice": VOICE, "voice_map": VOICE_MAP}).encode())
         else:
             self._send(404, b'{"error":"not found"}')
 
@@ -172,17 +232,18 @@ class H(BaseHTTPRequestHandler):
                 print(f"POST /v1/audio/speech voice={voice!r} REJECTED (not a voice id)", flush=True)
                 self._send(400, json.dumps({"error": "voice must be a Kokoro voice id like af_heart"}).encode())
                 return
-            print(f"POST /v1/audio/speech in={len(text)} chars voice={voice or VOICE}", flush=True)
+            print(f"POST /v1/audio/speech in={len(text)} chars voice={voice or VOICE}"
+                  + (f" ->{map_voice(voice or VOICE)}" if ENGINE == "qwen3" else ""), flush=True)
             if not text:
                 self._send(400, b'{"error":"no text"}')
                 return
             status, headers, audio = call_upstream(text, voice)
             if status != 200 or not _valid_pcm(audio):
-                print(f"  -> kokoro http={status} bytes={len(audio)} valid={_valid_pcm(audio)} "
+                print(f"  -> {ENGINE} http={status} bytes={len(audio)} valid={_valid_pcm(audio)} "
                       f"ELAPSED={__import__('time').time()-t0:.2f}s  FAIL", flush=True)
-                self._send(502, json.dumps({"error": "kokoro %d" % status}).encode())
+                self._send(502, json.dumps({"error": "%s %d" % (ENGINE, status)}).encode())
                 return
-            print(f"  -> kokoro http={status} bytes={len(audio)} "
+            print(f"  -> {ENGINE} http={status} bytes={len(audio)} "
                   f"ELAPSED={__import__('time').time()-t0:.2f}s  OK", flush=True)
             self._send(200, audio, "audio/pcm", extra={"X-Sample-Rate": "24000"})
         except Exception as e:
