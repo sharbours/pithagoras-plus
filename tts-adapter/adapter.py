@@ -17,10 +17,16 @@ Upstream engine (build #61, 2026-10-05): by default the upstream is Kokoro
 TTS_ENGINE=qwen3 re-points it at a Qwen3-TTS OpenAI-compatible server
 (groxaxo/Qwen3-TTS-Openai-Fastapi, TTS_BACKEND=official, model "tts-1") which
 serves the same /v1/audio/speech contract and the same 16-bit LE PCM @ 24 kHz.
-Qwen3 has 9 preset speakers (Vivian/Serena/Sohee/...); VOICE_MAP (a JSON env
-string) maps the portal's Kokoro ids onto them, unmapped ids fall back to
-QWEN_DEFAULT_VOICE. With TTS_ENGINE=kokoro (the default) the adapter behaves
-exactly as before, so the same file serves both engines.
+Qwen3 has 9 preset speakers (Vivian/Serena/Sohee/...); the avatar menu lists
+those speakers, and this adapter translates between the two engines' voice
+id spaces so the same menu works no matter which engine is live (build #61
+voice-menu, 2026-10-05):
+  - qwen3 engine: Qwen3 ids pass through; legacy Kokoro ids use VOICE_MAP
+    (JSON env), anything else falls back to QWEN_DEFAULT_VOICE.
+  - kokoro engine: Qwen3 ids are reversed through VOICE_MAP to their Kokoro
+    voice (vivian -> af_heart, ...); everything else passes straight through,
+    so a Kokoro-only deployment never setting these env vars stays
+    byte-identical to the pre-#61 adapter.
 
 Loopback-only, pure-stdlib. Raw-socket upstream because urllib/http.client
 triggers Kokoro's 401 header-parser quirk (see skill pithagoras-210-voice-llm).
@@ -46,12 +52,13 @@ CHUNK = 65536
 # TTS_BACKEND=official) speaks the same /v1/audio/speech contract as Kokoro
 # and returns identical 16-bit LE PCM @ 24 kHz, so this adapter's wire path
 # is unchanged; only the voice ids and the request "model" differ:
-#   - voice: the portal sends Kokoro ids (af_heart, ...). Qwen3 has 9 preset
-#     speakers (Vivian, Serena, Sohee, ...). VOICE_MAP (JSON, env) maps each
-#     Kokoro id to a Qwen speaker; unmapped ids fall back to QWEN_DEFAULT_VOICE.
+#   - voice: the portal sends either Qwen3 preset speaker ids (vivian,
+#     serena, ... — the current avatar menu lists exactly these) or legacy
+#     Kokoro ids (af_heart, ...). The mapping is bidirectional (see
+#     map_voice): qwen3 engine passes Qwen ids through and maps Kokoro ids
+#     onto speakers; kokoro engine reverses Qwen ids onto their Kokoro
+#     voice. Either engine's own native ids pass straight through.
 #   - model: Kokoro wants "kokoro"; the Qwen router wants "tts-1".
-# The mapping applies ONLY when TTS_ENGINE=qwen3, so a Kokoro deployment that
-# never sets it is byte-identical to the pre-#61 adapter.
 # ---------------------------------------------------------------------------
 ENGINE = os.environ.get("TTS_ENGINE", "kokoro").strip().lower()
 if ENGINE not in ("kokoro", "qwen3"):
@@ -72,14 +79,36 @@ def _load_voice_map():
 
 VOICE_MAP = _load_voice_map()
 
+# The Qwen3-TTS 12Hz 1.7B-CustomVoice preset speakers (canonical lowercase,
+# as returned by the wrapper's /v1/voices). The avatar menu lists exactly
+# these, so under the qwen3 engine they pass through unchanged.
+QWEN_NATIVE = frozenset({
+    "vivian", "serena", "uncle_fu", "dylan", "eric",
+    "ryan", "aiden", "ono_anna", "sohee",
+})
+
+# Reverse of VOICE_MAP: Qwen speaker -> Kokoro voice, for the kokoro engine
+# (a reboot restores Kokoro, and the menu still offers Qwen ids, so vivian
+# must become a real Kokoro voice instead of being sent verbatim).
+QWEN_REVERSE = {v: k for k, v in VOICE_MAP.items()}
+
 def map_voice(voice):
     """Map an incoming voice id to the upstream's speaker name.
 
-    kokoro engine: identity (the portal's Kokoro ids pass straight through).
-    qwen3 engine:  VOICE_MAP lookup, else QWEN_DEFAULT_VOICE."""
-    if ENGINE != "qwen3" or not voice:
+    qwen3 engine:  Qwen3 preset ids pass through; legacy Kokoro ids use
+        VOICE_MAP; anything else falls back to QWEN_DEFAULT_VOICE.
+    kokoro engine: Qwen3 preset ids are reversed to their Kokoro voice
+        (vivian -> af_heart, ...); Kokoro ids and anything else pass
+        straight through, so a Kokoro-only deployment is unchanged."""
+    if not voice:
         return voice
-    return VOICE_MAP.get(voice, QWEN_DEFAULT_VOICE)
+    if ENGINE == "qwen3":
+        if voice in QWEN_NATIVE:
+            return voice
+        return VOICE_MAP.get(voice, QWEN_DEFAULT_VOICE)
+    if voice in QWEN_NATIVE:
+        return QWEN_REVERSE.get(voice, VOICE)
+    return voice
 
 # a hex chunk-size line: 1-8 hex digits + CRLF
 CHUNK_HEAD_RE = re.compile(rb"^[0-9a-fA-F]{1,8}\r\n")
@@ -195,7 +224,9 @@ class H(BaseHTTPRequestHandler):
         if self.path.rstrip("/") in ("/health", ""):
             self._send(200, json.dumps({"status": "ok", "engine": "tts-adapter-v2",
                                        "upstream": UPSTREAM, "tts_engine": ENGINE,
-                                       "voice": VOICE, "voice_map": VOICE_MAP}).encode())
+                                       "voice": VOICE, "voice_map": VOICE_MAP,
+                                       "qwen_native": sorted(QWEN_NATIVE),
+                                       "qwen_reverse": QWEN_REVERSE}).encode())
         else:
             self._send(404, b'{"error":"not found"}')
 
