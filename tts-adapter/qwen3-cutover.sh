@@ -4,7 +4,7 @@
 #
 # Switches the live TTS path from Kokoro (:7863) to Qwen3-TTS (:7866):
 #   1. stops pithagoras-kokoro                    (frees ~5 GB VRAM)
-#   2. shrinks llama-server ctx 49152 -> 8192     (~2 GB VRAM; 24k kept)
+#   2. shrinks llama-server ctx 49152 -> 16384    (~0.3 GB q4-KV; keeps the pi 4096-token output reserve workable)
 #   3. starts qwen3-tts (systemd; 1.7B lazy-loads on first request)
 #   4. swaps the production adapter file (bind-mounted into the adapter
 #      container, ro) for the code3 version + sets TTS_ENGINE=qwen3 env
@@ -16,7 +16,7 @@
 #
 # VRAM (RTX 3060 12 GB, measured 2026-10-05):
 #   production:            llama 6808 + kokoro 5008          = 11865 MiB
-#   after cutover:         llama(-c8192) ~4600 + qwen3 4194  = ~8800 MiB
+#   after cutover:         llama(-c16384) ~5344 + qwen3 4482 = ~9826 MiB (2 GB headroom)
 #
 # Requires: /opt/qwen3-tts ready (venv, models, api code) - see QWEN3-README.md
 # ============================================================================
@@ -24,7 +24,7 @@ set -uo pipefail
 QWEN3_PORT=7866
 ADAPTER=pithagoras-tts-adapter
 LLAMA=llama-server
-NEW_CTX=8192
+NEW_CTX=16384  # 8192 broke the pi voice-brain clamp (ctx+4096 reserve > window -> max_tokens=1); 16384 costs ~320 MiB q4-KV only
 AD_FILE=/opt/pithagoras/tts-adapter/adapter.py
 AD_BAK=/opt/pithagoras/tts-adapter/adapter.py.q3-bak
 NEW_ADAPTER=${NEW_ADAPTER:-/opt/qwen3-tts/adapter.py}
