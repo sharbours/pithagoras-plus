@@ -11,7 +11,7 @@ Environment=PYTHONPATH=/opt/qwen3-tts/venv/lib/python3.10/site-packages
 Environment=PORT=7867
 Environment=HOST=127.0.0.1
 Environment=TTS_BACKEND=official
-Environment=TTS_MODEL_ID=/opt/qwen3-tts/models/Qwen3-TTS-12Hz-0.6B-Base
+Environment=TTS_MODEL_ID=/opt/qwen3-tts/models/Qwen3-TTS-12Hz-1.7B-Base
 Environment=TTS_DEVICE=cpu
 Environment=TTS_DTYPE=bfloat16
 Environment=TTS_ATTN=sdpa
