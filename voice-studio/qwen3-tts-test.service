@@ -1,0 +1,30 @@
+[Unit]
+Description=Pithagoras TTS TEST - Qwen3-TTS 0.6B-Base (voice cloning, CPU, side-port) - NOT production
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes
+WorkingDirectory=/opt/qwen3-tts
+Environment=PYTHONPATH=/opt/qwen3-tts/venv/lib/python3.10/site-packages
+Environment=PORT=7867
+Environment=HOST=127.0.0.1
+Environment=TTS_BACKEND=official
+Environment=TTS_MODEL_ID=/opt/qwen3-tts/models/Qwen3-TTS-12Hz-0.6B-Base
+Environment=TTS_DEVICE=cpu
+Environment=TTS_DTYPE=bfloat16
+Environment=TTS_ATTN=sdpa
+Environment=TTS_LAZY_LOAD=true
+Environment=ENABLE_VOICE_STUDIO=false
+Environment=VOICE_LIBRARY_DIR=/opt/qwen3-tts/voice_library-test
+Environment=HF_HUB_OFFLINE=1
+Environment=TRANSFORMERS_OFFLINE=1
+StandardOutput=append:/var/log/qwen3-tts-test.log
+StandardError=append:/var/log/qwen3-tts-test.log
+ExecStart=/opt/qwen3-tts/venv/bin/python -m api.main
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

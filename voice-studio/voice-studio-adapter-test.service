@@ -1,0 +1,21 @@
+[Unit]
+Description=Pithagoras Voice Studio TEST adapter (side-port 7868, CPU clone TTS on 7867) - NOT production
+After=network-online.target
+Wants=network-online.target qwen3-tts-test.service
+
+[Service]
+Type=simple
+User=hermes
+WorkingDirectory=/opt/qwen3-tts/voice-studio-test
+Environment=PORT=7868
+Environment=BIND=127.0.0.1
+Environment=TEST_UPSTREAM=http://127.0.0.1:7867
+Environment=VOICE_LIBRARY_DIR=/opt/qwen3-tts/voice_library-test
+StandardOutput=append:/var/log/voice-studio-test.log
+StandardError=append:/var/log/voice-studio-test.log
+ExecStart=/usr/bin/python3 /opt/qwen3-tts/voice-studio-test/adapter-test.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
