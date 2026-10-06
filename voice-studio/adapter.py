@@ -509,7 +509,8 @@ class H(BaseHTTPRequestHandler):
     def do_DELETE(self):
         path = self.path.split("?")[0]
         if path.startswith("/v1/voice/profiles/"):
-            name = path[len("/v1/voice/profiles/"):]
+            import urllib.parse
+            name = urllib.parse.unquote(path[len("/v1/voice/profiles/"):])
             pdir = os.path.join(VOICE_LIBRARY_DIR, "profiles")
             done = False
             for child in os.listdir(pdir) if os.path.isdir(pdir) else []:
@@ -535,4 +536,9 @@ class H(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     print(f"voice-studio adapter on {BIND}:{PORT} -> {UPSTREAM} (lib={VOICE_LIBRARY_DIR}, voices={VOICES_FILE})", flush=True)
+    # Bring the avatar picker in line with any profiles already in the library.
+    try:
+        regenerate_voices_file([p["id"] for p in _list_profiles()])
+    except Exception as e:
+        print(f"startup voices regen FAILED (non-fatal): {e!r}", flush=True)
     ThreadingHTTPServer((BIND, PORT), H).serve_forever()
