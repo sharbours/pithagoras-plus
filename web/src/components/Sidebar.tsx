@@ -7,6 +7,7 @@ import {
   LuClock,
   LuGlobe,
   LuMessagesSquare,
+  LuMic,
   LuPin,
   LuPinOff,
   LuPlus,
@@ -198,6 +199,21 @@ export function Sidebar({
           onClick={() => onNavigate("audit")}
           active={view === "audit"}
         />
+        {/* External, on this box: the Voice Studio manages the Qwen3-TTS
+            clone-voice library and regenerates the avatar's speaking-voice
+            picker, so creating a new clone voice lives there (not in the
+            portal's own voice settings, which never reach the engine). */}
+        <a
+          href={`http://${window.location.hostname}:7871/studio`}
+          target="_blank"
+          rel="noreferrer"
+          className="group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm text-fg-muted transition hover:bg-fg/5 hover:text-fg"
+        >
+          <span className="shrink-0 text-fg-faint transition-colors group-hover:text-fg-subtle">
+            <LuMic />
+          </span>
+          Clone voice
+        </a>
 
         {creating && (
           <div className="mt-2 space-y-2 px-1">
