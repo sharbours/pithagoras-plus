@@ -192,7 +192,7 @@ export function voiceRouter(): Router {
     let text = typeof req.body?.text === "string" ? sanitizeSpeechText(req.body.text) : "";
     if (!text) text = "Hi, this is how I sound with this voice.";
     if (text.length > 300) return res.status(400).json({ error: "Preview text must be 300 characters or fewer" });
-    const voice = typeof req.body?.voice === "string" && /^[a-zA-Z0-9_-]{1,32}$/.test(req.body.voice) ? req.body.voice : "";
+    const voice = typeof req.body?.voice === "string" && /^(?:[a-zA-Z0-9_-]{1,32}|clone:[a-zA-Z0-9_-]{1,32}(?: [a-zA-Z0-9_-]{1,32})*)$/.test(req.body.voice) ? req.body.voice : "";
     const controller = new AbortController();
     res.on("close", () => controller.abort());
     try {
@@ -314,7 +314,7 @@ export function voiceRouter(): Router {
     // (af_heart, am_adam, ...) or an OpenAI alias (coral, nova, ...). Validated
     // against a strict whitelist so a stray value can never alter the upstream
     // request shape; an empty value keeps the adapter's global default.
-    const voice = typeof req.body?.voice === "string" && /^[a-zA-Z0-9_-]{1,32}$/.test(req.body.voice)
+    const voice = typeof req.body?.voice === "string" && /^(?:[a-zA-Z0-9_-]{1,32}|clone:[a-zA-Z0-9_-]{1,32}(?: [a-zA-Z0-9_-]{1,32})*)$/.test(req.body.voice)
       ? req.body.voice : "";
     // Diagnostic: which client synthesized this (voice vs read-aloud). Two
     // lines for the same text = the double-TTS "echo" bug is back.

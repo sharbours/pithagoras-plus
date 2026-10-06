@@ -1,0 +1,22 @@
+[Unit]
+Description=Pithagoras Voice Studio - clone-voice manager (1.7B-Base, :7871, LAN)
+After=network-online.target qwen3-tts-base.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes
+WorkingDirectory=/opt/qwen3-tts
+Environment=PORT=7871
+Environment=BIND=0.0.0.0
+Environment=VOX_UPSTREAM=http://127.0.0.1:7869
+Environment=VOICE_LIBRARY_DIR=/opt/qwen3-tts/voice_library
+Environment=VOX_VOICES_FILE=/opt/pithagoras/web/avatar/kokoro-voices.js
+StandardOutput=append:/var/log/voice-studio-adapter.log
+StandardError=append:/var/log/voice-studio-adapter.log
+ExecStart=/usr/bin/python3 /opt/qwen3-tts/voice-studio/adapter.py
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
