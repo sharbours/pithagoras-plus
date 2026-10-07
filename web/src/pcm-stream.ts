@@ -56,7 +56,7 @@ export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: 
   const pending: AudioBuffer[] = [];
   const sources = new Set<AudioBufferSourceNode>();
   let destination: AudioNode | undefined, nextTime = 0, finished = false, carry: number | undefined;
-  let buffered = 0, started = false;
+  let buffered = 0, started = false, played = false;
   let ready!: () => void, rejectReady!: (error: unknown) => void;
   const initial = new Promise<void>((resolve, reject) => { ready = resolve; rejectReady = reject; });
   let finishPlay!: () => void, failPlay!: (error: unknown) => void;
@@ -67,7 +67,14 @@ export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: 
       const source = audio.createBufferSource(); source.buffer = buffer; source.connect(destination);
       sources.add(source);
       source.onended = () => { sources.delete(source); source.disconnect(); if (finished && !sources.size) finishPlay(); };
-      nextTime = Math.max(nextTime, audio.currentTime + 0.04);
+      // The engine synthesizes slower than real time (RTF ~1.1-1.7), so while
+      // it is generating the schedule can fall behind audio.currentTime (an
+      // underrun). Scheduling into the past re-emits already-played audio on
+      // top of the live playback — heard as repeating syllables that restart
+      // from shorter and shorter points, ending in noise. Clamp forward to
+      // now (+ a short gap) instead: a brief silence is imperceptible, overlap
+      // is not.
+      nextTime = nextTime < audio.currentTime ? audio.currentTime + 0.02 : Math.max(nextTime, audio.currentTime + 0.04);
       const scheduledAt=nextTime; source.start(nextTime); nextTime += buffer.duration;
       if (!started) { started = true; onStarted(scheduledAt); }
     }
@@ -94,7 +101,12 @@ export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: 
         const buffer = audio.createBuffer(1, count, 24000), samples = buffer.getChannelData(0), view = new DataView(bytes.buffer);
         for (let i = 0; i < count; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
         pending.push(buffer); buffered += buffer.duration;
-        if (buffered >= 0.65) ready();
+        // 1.5 s of buffer before first playback. The engine streams slower
+        // than real time, so the cushion must cover the drift of the first
+        // ~1.5 s of audio (~0.15-0.5 s at RTF 1.1-1.7) plus chunk-boundary
+        // jitter. 0.65 s was tuned for a near-real-time producer and
+        // guaranteed an underrun mid-first-phrase.
+        if (buffered >= 1.5) ready();
         pump();
       }
       if (!buffered || carry !== undefined) throw new Error('Breeze returned incomplete PCM audio');
@@ -107,6 +119,13 @@ export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: 
   try { await initial; } catch (error) { signal.removeEventListener('abort', cancel); throw error; }
   return { completed, play: async (output: AudioNode, notify: (scheduledAt?:number) => void) => {
     signal.throwIfAborted();
+    // Scheduling is one-shot per phrase. The pipeline may call play() again on
+    // the same prepared speech (e.g. a hands-free barge-in re-arm); without this
+    // guard the entire buffered queue would be re-scheduled from audio.currentTime,
+    // overlapping the still-playing tail — heard as repeating syllables that
+    // restart from shorter and shorter points, ending in noise.
+    if (played) return;
+    played = true;
     try {
       await new Promise<void>((resolve, reject) => { finishPlay = resolve; failPlay = reject; destination = output; onStarted = notify; pump(); });
     } finally { signal.removeEventListener('abort', cancel); }
