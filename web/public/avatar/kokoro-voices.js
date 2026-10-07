@@ -14,7 +14,11 @@ window.KOKORO_VOICES = [
   { id: "clone:Dylan", g: "M", t: "Dylan \· Beijing male \· clear, natural" },
   { id: "clone:Eric", g: "M", t: "Eric \· Chengdu male \· lively, slightly husky" },
   { id: "clone:Uncle Fu", g: "M", t: "Uncle Fu \· seasoned male \· low, mellow timbre" },
+  { id: "clone:Kate", g: "C", t: "Kate \· cloned voice" },
+  { id: "clone:KatherineHepburn", g: "C", t: "KatherineHepburn \· cloned voice" },
   { id: "clone:LeonardNimoy", g: "C", t: "LeonardNimoy \· cloned voice" },
+  { id: "clone:Madeline", g: "C", t: "Madeline \· cloned voice" },
+  { id: "clone:SouthIrish", g: "C", t: "SouthIrish \· cloned voice" },
   { id: "clone:Vivian 17B", g: "C", t: "Vivian 17B \· cloned voice" },
 ];
 window.KOKORO_LABELS = Object.fromEntries(window.KOKORO_VOICES.map(v => [v.id, v.t]));
