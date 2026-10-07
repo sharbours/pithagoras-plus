@@ -227,11 +227,25 @@ export function SpeakReplies({
       // and reports it to the server, where the tone was verified clean.
       let analyser: AnalyserNode | null = null;
       let toneWatcher: ToneWatcher | null = null;
+      // One chunk ahead: while the current chunk plays, the next is already
+      // being synthesized, so the engine's per-sentence latency (2-20 s on
+      // the Qwen3-TTS GPU) overlaps speech instead of becoming dead air
+      // between sentences. The engine accepts one request at a time and
+      // answers 409 while busy, so the next request only starts once the
+      // previous one has finished playing — never more than one in flight.
+      let prev: Promise<void> | null = null;
       try {
-        for (const chunk of chunks) {
-          signal.throwIfAborted();
-          if (!enabled) return;
-          const buffer = await synthesize(chunk, signal);
+        for (let i = 0; i < chunks.length; i++) {
+          if (signal.aborted || !enabled) break;
+          // Kick off this chunk's synthesis now; it overlaps with the
+          // playback of the previous chunk. It is always awaited in this
+          // iteration (or settled before we bail), so it can never become
+          // an unhandled rejection.
+          const synth = synthesize(chunks[i], signal);
+          if (prev) await prev.catch((e) => { if (!aborted(e)) throw e; });
+          if (signal.aborted || !enabled) { await synth.catch(() => {}); break; }
+          const buffer = await synth;
+          if (signal.aborted || !enabled) break;
           const audio = context.current;
           if (audio && (audio.state as string) !== "closed") {
             if (!analyser) {
@@ -241,14 +255,22 @@ export function SpeakReplies({
                 fetch(`/api/sessions/${sessionId}/voice/tones`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ finding }) }).catch(() => {});
               }, () => 0);
             }
-            await playBuffer(buffer, audio, analyser, signal);
+            prev = playBuffer(buffer, audio, analyser, signal).then(
+              () => undefined,
+              (e: unknown) => { if (!aborted(e)) throw e; },
+            );
+          } else {
+            prev = null;
           }
         }
+        // Let the last chunk finish playing before releasing the speaking state.
+        if (prev) await prev.catch((e) => { if (!aborted(e)) throw e; });
       } catch (e) {
         if (!aborted(e) && mounted.current) {
           setError((e as Error)?.message || "Speech generation failed");
         }
       } finally {
+        prev = null;
         toneWatcher?.stop();
         analyser?.disconnect();
         busy.current = false;

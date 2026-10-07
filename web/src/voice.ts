@@ -27,10 +27,15 @@ export function speechChunks(text: string): string[] {
     .replace(/<[^>]*>/g, '').replace(/[*_`#>|]/g, '').replace(/\s+/g, ' ').trim();
   const chunks: string[] = [];
   let remaining = plain;
-  while (remaining.length > 600) {
-    const prefix = remaining.slice(0, 600);
+  // ~200 chars per chunk (~5-6 s of speech). The Qwen3-TTS 1.7B-Base engine
+  // synthesizes at ~1.1-1.3x real-time, so a shorter chunk means the first
+  // audio of a reply arrives much sooner and each chunk's synthesis stays
+  // close to real-time; SpeakReplies pre-synthesizes the next chunk while the
+  // current one plays, so the shorter chunks never create gaps.
+  while (remaining.length > 200) {
+    const prefix = remaining.slice(0, 200);
     const sentence = Math.max(prefix.lastIndexOf('. '), prefix.lastIndexOf('? '), prefix.lastIndexOf('! '));
-    const end = sentence > 100 ? sentence + 1 : prefix.lastIndexOf(' ') > 0 ? prefix.lastIndexOf(' ') : 600;
+    const end = sentence > 40 ? sentence + 1 : prefix.lastIndexOf(' ') > 0 ? prefix.lastIndexOf(' ') : 200;
     chunks.push(remaining.slice(0, end)); remaining = remaining.slice(end).trimStart();
   }
   if (remaining) chunks.push(remaining);
