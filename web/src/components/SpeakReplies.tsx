@@ -15,56 +15,70 @@ import { ToneWatcher } from "../tone-watch";
  * Click to start: the last completed reply is spoken, then every new completed
  * reply is spoken as it arrives. Click again to stop. While enabled it holds a
  * voice lease so the lazy-loaded TTS model stays warm between replies.
+ *
+ * Build #64 (streaming back end): each 200-char chunk is decoded and played
+ * in 128 ms windows from the live PCM stream, so the first audio starts ~0.6 s
+ * after the request when the engine streams (instead of waiting for the whole
+ * chunk) and the next chunk's synthesis is kicked off while the current one
+ * plays. With a non-streaming engine the window simply fills slower (the
+ * whole-chunk behavior of #63 is the fallback), so this is a strict upgrade.
  */
 
 const KEY = "speakReplies.v1";
 
-function readPcm(response: Response, sampleRate: number): Promise<AudioBuffer> {
+// 128 ms of 24 kHz mono audio. One window is the playback quantum; the hop
+// between windows is a few ms of buffer scheduling (inaudible).
+const WINDOW_FRAMES = 3072;
+const STREAM_RATE = 24000; // the adapter guarantees 24 kHz s16le mono
+
+/**
+ * Decode the PCM response body into sequential 128 ms AudioBuffers.
+ * Every byte is consumed: a single read spanning several windows yields
+ * several windows, and the final partial window (the chunk's tail) is the
+ * last yield. Respects the abort signal; the body reader is released on any
+ * exit path (including g.return()).
+ */
+async function* audioWindows(
+  response: Response,
+  context: AudioContext,
+  signal: AbortSignal,
+): AsyncGenerator<AudioBuffer> {
   const body = response.body;
-  if (!body) return Promise.reject(new Error("Speech generation failed"));
+  if (!body) throw new Error("Speech generation failed");
   const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let length = 0;
-  return new Promise<AudioBuffer>((resolve, reject) => {
-    const fail = (error: Error) => {
-      void reader.cancel().catch(() => {});
-      reject(error);
-    };
-    (async () => {
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (value) {
-            chunks.push(value);
-            length += value.length;
-          }
+  const samples = new Float32Array(WINDOW_FRAMES);
+  let count = 0;
+  const make = (n: number): AudioBuffer => {
+    const buffer = context.createBuffer(1, n, STREAM_RATE);
+    buffer.getChannelData(0).set(samples.subarray(0, n));
+    return buffer;
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      const view = new DataView(value.buffer, value.byteOffset, value.byteLength);
+      const frames = value.length >> 1;
+      let src = 0;
+      while (src < frames) {
+        const take = Math.min(frames - src, WINDOW_FRAMES - count);
+        for (let i = 0; i < take; i++) {
+          samples[count + i] = view.getInt16((src + i) * 2, true) / 32768;
         }
-        await reader.cancel().catch(() => {});
-        reader.releaseLock();
-        if (!length || length % 2) throw new Error("Incomplete speech stream");
-        const bytes = new Uint8Array(length);
-        let offset = 0;
-        for (const chunk of chunks) {
-          bytes.set(chunk, offset);
-          offset += chunk.length;
+        src += take;
+        count += take;
+        if (count === WINDOW_FRAMES) {
+          yield make(WINDOW_FRAMES);
+          count = 0;
         }
-        const buffer = new AudioBuffer({
-          numberOfChannels: 1,
-          length: length / 2,
-          sampleRate,
-        });
-        const samples = buffer.getChannelData(0);
-        const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-        for (let i = 0; i < samples.length; i++) {
-          samples[i] = view.getInt16(i * 2, true) / 32768;
-        }
-        resolve(buffer);
-      } catch (e) {
-        fail(e as Error);
       }
-    })();
-  });
+    }
+    if (count > 0) yield make(count); // tail: the chunk's last partial window
+  } finally {
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 function playBuffer(
@@ -175,8 +189,9 @@ export function SpeakReplies({
     setSpeaking(false);
   }, [releaseLease]);
 
-  const synthesize = useCallback(
-    async (text: string, signal: AbortSignal): Promise<AudioBuffer> => {
+  /** Fetch one chunk's PCM stream (retries the engine's 409 busy window). */
+  const fetchStream = useCallback(
+    async (text: string, signal: AbortSignal): Promise<Response> => {
       let response: Response;
       const deadline = Date.now() + 20000;
       for (;;) {
@@ -195,7 +210,7 @@ export function SpeakReplies({
         if (!busy409 || Date.now() >= deadline) {
           throw new Error(failure.error || "Speech generation failed");
         }
-        // The previous request may still be releasing Breeze's GPU lock.
+        // The previous request may still be releasing the engine's GPU lock.
         await new Promise<void>((resolve, reject) => {
           const timer = setTimeout(() => {
             signal.removeEventListener("abort", cancel);
@@ -209,10 +224,27 @@ export function SpeakReplies({
           if (signal.aborted) cancel();
         });
       }
-      const rate = Number(response.headers.get("x-sample-rate") ?? 24000);
-      return readPcm(response, Number.isFinite(rate) && rate > 0 ? rate : 24000);
+      return response;
     },
     [sessionId],
+  );
+
+  /** Open a chunk's PCM stream and pull its first 128 ms window (the TTFB
+   *  point for that chunk). Throws on an empty stream so the caller skips it
+   *  instead of hanging. */
+  const openWindows = useCallback(
+    async (text: string, signal: AbortSignal) => {
+      const audio = context.current;
+      if (!audio) throw new Error("No audio context");
+      const response = await fetchStream(text, signal);
+      const gen = audioWindows(response, audio, signal);
+      const first = await gen.next();
+      if (first.done) {
+        throw new Error("Speech generation returned no audio");
+      }
+      return { gen, first };
+    },
+    [fetchStream],
   );
 
   const speakFresh = useCallback(
@@ -227,109 +259,122 @@ export function SpeakReplies({
       // and reports it to the server, where the tone was verified clean.
       let analyser: AnalyserNode | null = null;
       let toneWatcher: ToneWatcher | null = null;
-      // One chunk ahead: while the current chunk plays, the next is already
-      // being synthesized, so the engine's per-sentence latency (2-20 s on
-      // the Qwen3-TTS GPU) overlaps speech instead of becoming dead air
-      // between sentences. The engine accepts one request at a time and
-      // answers 409 while busy, so the next request only starts once the
-      // previous one has finished playing — never more than one in flight.
-      let prev: Promise<void> | null = null;
+      // 1-ahead: while chunk i plays, chunk i+1 is already being fetched and
+      // its first window pulled. With the streaming engine that first window
+      // arrives in <1 s, so the hop between chunks is a few ms; with a
+      // non-streaming engine the fetch simply takes the full generation time
+      // (the #63 behavior) — at most one request in flight, so the engine's
+      // 409-while-busy contract holds.
+      type Part = { gen: AsyncGenerator<AudioBuffer>; first: IteratorResult<AudioBuffer> };
+      let next: Promise<Part> | null = null;
+      const close = (part: Part) => {
+        void part.gen.return?.(undefined).catch(() => {});
+      };
       try {
         for (let i = 0; i < chunks.length; i++) {
           if (signal.aborted || !enabled) break;
-          // Kick off this chunk's synthesis now; it overlaps with the
-          // playback of the previous chunk. It is always awaited in this
-          // iteration (or settled before we bail), so it can never become
-          // an unhandled rejection.
-          const synth = synthesize(chunks[i], signal);
-          if (prev) await prev.catch((e) => { if (!aborted(e)) throw e; });
-          if (signal.aborted || !enabled) { await synth.catch(() => {}); break; }
-          const buffer = await synth;
-          if (signal.aborted || !enabled) break;
           const audio = context.current;
-          if (audio && (audio.state as string) !== "closed") {
-            if (!analyser) {
-              analyser = audio.createAnalyser(); analyser.fftSize = 2048;
-              analyser.connect(audio.destination);
-              toneWatcher = new ToneWatcher(audio, analyser, finding => {
-                fetch(`/api/sessions/${sessionId}/voice/tones`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ finding }) }).catch(() => {});
-              }, () => 0);
-            }
-            prev = playBuffer(buffer, audio, analyser, signal).then(
-              () => undefined,
-              (e: unknown) => { if (!aborted(e)) throw e; },
-            );
-          } else {
-            prev = null;
+          if (!audio || (audio.state as string) === "closed") break;
+          if (!analyser) {
+            analyser = audio.createAnalyser();
+            analyser.fftSize = 2048;
+            analyser.connect(audio.destination);
+            toneWatcher = new ToneWatcher(audio, analyser, (finding) => {
+              fetch(`/api/sessions/${sessionId}/voice/tones`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ finding }) }).catch(() => {});
+            }, () => 0);
+          }
+          // Start chunk i's stream now (or take the prefetched one).
+          const pending = next ?? (next = openWindows(chunks[i], signal));
+          next = null;
+          const part = await pending;
+          if (signal.aborted || !enabled) {
+            close(part);
+            break;
+          }
+          let r = part.first;
+          while (!r.done) {
+            await playBuffer(r.value, audio, analyser, signal);
+            if (signal.aborted || !enabled) break;
+            r = await part.gen.next();
+          }
+          close(part);
+          if (signal.aborted || !enabled) break;
+          // Kick off the next chunk now that this one has finished.
+          if (i + 1 < chunks.length) {
+            next = openWindows(chunks[i + 1], signal);
           }
         }
+        // Drain a prefetched-but-unplayed chunk (abort or the last one
+        // settled) without letting its rejection escape.
+        if (next) await next.catch(() => {});
         // Let the last chunk finish playing before releasing the speaking state.
-        if (prev) await prev.catch((e) => { if (!aborted(e)) throw e; });
       } catch (e) {
         if (!aborted(e) && mounted.current) {
           setError((e as Error)?.message || "Speech generation failed");
         }
       } finally {
-        prev = null;
+        next = null;
         toneWatcher?.stop();
         analyser?.disconnect();
         busy.current = false;
         setSpeaking(false);
       }
     },
-    [enabled, synthesize],
+    [enabled, openWindows],
   );
 
   const start = useCallback(
     async (skipLast = false, itemsSnapshot?: Item[]) => {
       if (arming || context.current) return;
-    setArming(true);
-    setError("");
-    try {
-      const AudioContextCtor =
-        window.AudioContext ??
-        (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioContextCtor) throw new Error("This browser does not support audio playback");
-      const audio = new AudioContextCtor();
-      if (audio.state === "suspended") await audio.resume().catch(() => {});
-      context.current = audio;
-      const client = `speak-replies:${sessionId}`;
-      const res = await fetch(`/api/sessions/${sessionId}/voice/connection`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client, active: true }),
-      });
-      if (res.ok) lease.current = client;
-      else await releaseLease(client);
-      if (!mounted.current) {
+      setArming(true);
+      setError("");
+      try {
+        const AudioContextCtor =
+          window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+        if (!AudioContextCtor) throw new Error("This browser does not support audio playback");
+        const audio = new AudioContextCtor();
+        if (audio.state === "suspended") await audio.resume().catch(() => {});
+        context.current = audio;
+        const client = `speak-replies:${sessionId}`;
+        const res = await fetch(`/api/sessions/${sessionId}/voice/connection`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ client, active: true }),
+        });
+        if (res.ok) lease.current = client;
+        else await releaseLease(client);
+        if (!mounted.current) {
+          stop();
+          return;
+        }
+        // Speak the last completed reply, then only replies that complete after
+        // this; the effect below re-scans on every new item and picks the rest
+        // up because their sequence number is newer than afterSeq. When
+        // resuming after voice mode (skipLast), start at the last reply's seq:
+        // VoiceControl just spoke it, and the items effect has already marked
+        // anything older as seen, so nothing gets repeated.
+        const itemList = itemsSnapshot ?? items;
+        afterSeq.current = 0;
+        const last = [...itemList].reverse().find(
+          (i): i is Extract<Item, { kind: "assistant" }> => i.kind === "assistant" && i.done,
+        );
+        if (last) afterSeq.current = Number(last.id.slice(1)) - (skipLast ? 0 : 1);
+        setEnabledFlag(true);
+        const chunks = last ? speechChunks(last.text) : [];
+        if (chunks.length && !skipLast) await speakFresh(chunks);
+      } catch (e) {
+        if (mounted.current) setError((e as Error)?.message || "Could not start speech output");
         stop();
-        return;
+        if (mounted.current) setEnabledFlag(false);
+      } finally {
+        if (mounted.current) setArming(false);
       }
-      // Speak the last completed reply, then only replies that complete after
-      // this; the effect below re-scans on every new item and picks the rest
-      // up because their sequence number is newer than afterSeq. When
-      // resuming after voice mode (skipLast), start at the last reply's seq:
-      // VoiceControl just spoke it, and the items effect has already marked
-      // anything older as seen, so nothing gets repeated.
-      const itemList = itemsSnapshot ?? items;
-      afterSeq.current = 0;
-      const last = [...itemList].reverse().find(
-        (i): i is Extract<Item, { kind: "assistant" }> => i.kind === "assistant" && i.done,
-      );
-      if (last) afterSeq.current = Number(last.id.slice(1)) - (skipLast ? 0 : 1);
-      setEnabledFlag(true);
-      const chunks = last ? speechChunks(last.text) : [];
-      if (chunks.length && !skipLast) await speakFresh(chunks);
-    } catch (e) {
-      if (mounted.current) setError((e as Error)?.message || "Could not start speech output");
-      stop();
-      if (mounted.current) setEnabledFlag(false);
-    } finally {
-      if (mounted.current) setArming(false);
-    }
+    },
     // items is read once, when the user clicks — never on re-render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [arming, sessionId, releaseLease, stop, speakFresh]);
+    [arming, sessionId, releaseLease, stop, speakFresh],
+  );
 
   // Reset per session: a different session has a different reply stream, and a
   // lease belongs to the session that took it. Never auto-start while voice
