@@ -86,11 +86,12 @@ function playBuffer(
   context: AudioContext,
   destination: AudioNode,
   signal: AbortSignal,
+  gate?: AudioNode | null,
 ): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const source = context.createBufferSource();
     source.buffer = buffer;
-    source.connect(destination);
+    source.connect(gate ?? destination);
     const finish = () => {
       source.onended = null;
       source.disconnect();
@@ -259,6 +260,13 @@ export function SpeakReplies({
       // and reports it to the server, where the tone was verified clean.
       let analyser: AnalyserNode | null = null;
       let toneWatcher: ToneWatcher | null = null;
+      // Soft noise gate (build #67): the same AudioWorklet the voice stage
+      // uses. Clone voices leave a quiet tonal codec bed in the gaps between
+      // sentences; the gate removes it (and true silence stays true). It sits
+      // UPSTREAM of the analyser, so the tone tripwire still sees (now clean)
+      // playback. Off via localStorage pith.softgate="0", or if the worklet
+      // fails to load; then audio plays direct to the analyser.
+      let gate: AudioNode | null = null;
       // 1-ahead: while chunk i plays, chunk i+1 is already being fetched and
       // its first window pulled. With the streaming engine that first window
       // arrives in <1 s, so the hop between chunks is a few ms; with a
@@ -282,6 +290,16 @@ export function SpeakReplies({
             toneWatcher = new ToneWatcher(audio, analyser, (finding) => {
               fetch(`/api/sessions/${sessionId}/voice/tones`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ finding }) }).catch(() => {});
             }, () => 0);
+            try {
+              if (localStorage.getItem("pith.softgate") !== "0"
+                  && audio.sampleRate >= 8000 && audio.sampleRate <= 48000) {
+                await audio.audioWorklet.addModule("/avatar/softgate.js");
+                gate = new AudioWorkletNode(audio, "softgate", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+                gate.connect(analyser);
+              }
+            } catch {
+              gate = null;
+            }
           }
           // Start chunk i's stream now (or take the prefetched one).
           const pending = next ?? (next = openWindows(chunks[i], signal));
@@ -293,7 +311,7 @@ export function SpeakReplies({
           }
           let r = part.first;
           while (!r.done) {
-            await playBuffer(r.value, audio, analyser, signal);
+            await playBuffer(r.value, audio, analyser, signal, gate);
             if (signal.aborted || !enabled) break;
             r = await part.gen.next();
           }
@@ -315,6 +333,7 @@ export function SpeakReplies({
       } finally {
         next = null;
         toneWatcher?.stop();
+        gate?.disconnect();
         analyser?.disconnect();
         busy.current = false;
         setSpeaking(false);

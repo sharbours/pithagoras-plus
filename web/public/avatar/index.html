@@ -220,6 +220,7 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
           <label>Movement speed <input type="range" id="pickMotion" min="10" max="200" step="5" value="50" aria-label="Movement speed — how fast gestures, poses, dances and the idle sway play (100% is the original speed)"> <span class="pick-scale-val" id="pickMotionVal">50%</span></label>
           <label>Background <select id="pickBg"></select></label>
           <label>Speaking voice <select id="pickVoice" aria-label="Speaking voice (Kokoro)"></select></label>
+          <label><input type="checkbox" id="pickSoftgate" checked> Soft noise gate — <span style="color:var(--muted);font-size:12px">removes the hum clone voices leave in the gaps between sentences (on = default; clean voices are unaffected)</span></label>
           <div class="persona-row">
             <label>Personality <select id="pickPersona" aria-label="Personality (how the agent talks)"></select></label>
             <button class="btn" id="pickPersonaEdit" title="Edit this personality's text — shared by every avatar that uses it.">Edit text…</button>

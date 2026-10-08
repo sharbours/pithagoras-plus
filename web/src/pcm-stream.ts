@@ -31,9 +31,42 @@ export async function readPcmStream(
   return buffer;
 }
 
+const WORKLET_PATH = "/avatar/softgate.js";
+const GATE_KEY = "pith.softgate";
+
+/**
+ * Create the soft-gate node for a (context, destination) pair and connect
+ * gate -> destination, returning the gate. The worklet module itself loads
+ * once per URL (addModule is idempotent); the node cost is trivial relative
+ * to a full phrase, so one gate per connection is fine. Returns null when
+ * the user has turned the gate off or the worklet failed to load — callers
+ * fall back to a direct connection, so audio can never be lost.
+ */
+async function softGateFor(audio: AudioContext, destination: AudioNode): Promise<AudioNode | null> {
+  if (audio.sampleRate < 8000 || audio.sampleRate > 48000) return null;
+  try {
+    if (localStorage.getItem(GATE_KEY) === "0") return null;
+    await audio.audioWorklet.addModule(WORKLET_PATH);
+    const gate = new AudioWorkletNode(audio, "softgate", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+    gate.connect(destination);
+    return gate;
+  } catch {
+    return null;
+  }
+}
+
+/** Connect an output node to a destination, routing it through the soft
+ * gate when available (removes the tonal codec bed that clone voices leave
+ * in the gaps between sentences). Falls back to a direct connection. */
+async function toDestination(node: AudioNode, destination: AudioNode, audio: AudioContext): Promise<void> {
+  const gate = await softGateFor(audio, destination);
+  node.connect(gate ?? destination);
+}
+
 export async function playAudioBuffer(buffer: AudioBuffer, audio: AudioContext, destination: AudioNode, signal: AbortSignal, onStarted: (scheduledAt?:number) => void): Promise<void> {
   signal.throwIfAborted();
-  const source = audio.createBufferSource(); source.buffer = buffer; source.connect(destination);
+  const source = audio.createBufferSource(); source.buffer = buffer;
+  await toDestination(source, destination, audio);
   await new Promise<void>((resolve, reject) => {
     const finish = () => { signal.removeEventListener('abort', cancel); source.disconnect(); resolve(); };
     const cancel = () => { source.onended = null; source.stop(); signal.removeEventListener('abort', cancel); source.disconnect(); reject(signal.reason); };
@@ -126,8 +159,12 @@ export async function preparePcmSpeech(body: ReadableStream<Uint8Array>, audio: 
     // restart from shorter and shorter points, ending in noise.
     if (played) return;
     played = true;
+    // Resolve the soft-gate for this output BEFORE scheduling any source, so
+    // the whole phrase (including the first buffered chunk) is routed through
+    // it. The gate removes the tonal codec bed in the inter-sentence gaps.
+    const gate = await softGateFor(audio, output);
     try {
-      await new Promise<void>((resolve, reject) => { finishPlay = resolve; failPlay = reject; destination = output; onStarted = notify; pump(); });
+      await new Promise<void>((resolve, reject) => { finishPlay = resolve; failPlay = reject; destination = gate ?? output; onStarted = notify; pump(); });
     } finally { signal.removeEventListener('abort', cancel); }
   } };
 }

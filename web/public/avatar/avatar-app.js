@@ -2270,6 +2270,14 @@ if ($("#pickTestVoice")) $("#pickTestVoice").onclick = () => testKokoroVoice();
   if (pp) pp.oninput = () => setPos(pp.value / 100);
   if (ps) ps.oninput = () => setScale(+ps.value);
   const pm = $("#pickMotion"); if (pm) pm.oninput = () => setMotionScale(+pm.value / 100);
+  // Soft noise gate (build #67): shared key pith.softgate — "0" = off, absent/1 = on.
+  // Same origin as the voice app, so the checkbox and the playback paths agree.
+  const pg = $("#pickSoftgate");
+  if (pg) {
+    pg.checked = true; // default on; only an explicit "0" opts out
+    try { pg.checked = localStorage.getItem("pith.softgate") !== "0"; } catch {}
+    pg.onchange = () => { try { pg.checked ? localStorage.removeItem("pith.softgate") : localStorage.setItem("pith.softgate", "0"); } catch {} };
+  }
   pb.onchange = () => {
     if (!pb.value) { applyBackground(null); return; }
     if (pb.value === "upload") { log("Upload a new background image to replace the saved one."); $("#bgInput").click(); return; }
