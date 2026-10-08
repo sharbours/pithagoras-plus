@@ -217,6 +217,7 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
           </select></label>
           <label>Position <input type="range" id="pickPos" min="0" max="100" step="1" value="50" aria-label="Horizontal position in the stage"></label>
           <label>Character size <input type="range" id="pickScale" min="50" max="100" step="1" value="100" aria-label="Character size — shrinks the character, not the picture or background"> <span class="pick-scale-val" id="pickScaleVal">100%</span></label>
+          <label>Movement speed <input type="range" id="pickMotion" min="10" max="200" step="5" value="50" aria-label="Movement speed — how fast gestures, poses, dances and the idle sway play (100% is the original speed)"> <span class="pick-scale-val" id="pickMotionVal">50%</span></label>
           <label>Background <select id="pickBg"></select></label>
           <label>Speaking voice <select id="pickVoice" aria-label="Speaking voice (Kokoro)"></select></label>
           <div class="persona-row">
@@ -241,6 +242,12 @@ code{font-size:12.5px;background:var(--chip);border:1px solid var(--line);border
           <button id="modeDriven" aria-pressed="false">LLM-driven</button>
         </div>
         <p class="hint" id="modeHint">Idle: the character glances around, blinks and emotes on its own.</p>
+      </div>
+
+      <div class="sec">
+        <h2>Movement</h2>
+        <div class="row"><label>Speed <input type="range" id="pickMotion2" min="10" max="200" step="5" value="50" aria-label="Movement speed — scales how fast gestures, poses, dances and the idle sway play"> <span class="pick-scale-val" id="pickMotionVal2">50%</span></label></div>
+        <p class="hint">How fast the avatar moves. 100% is the original speed; the default is 50% (half).</p>
       </div>
 
       <div class="sec">

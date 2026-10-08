@@ -29,6 +29,18 @@ let posFrac = 0.5;   // default until restore()/the picker runs
 // feet. The background (#bgImage) and the panel (host X/Y, the iframe itself) are
 // separate layers and are never affected.
 let charScale = 1;   // 1 = full size; 0.5 = smallest the slider allows
+// Movement speed: 1 = the original speed, 0.5 = half (build #66 default). Scales the
+// clock that every body motion is computed from (idle sway/breath, dance & exercise
+// clips, gestures, pose transitions, yawn) so a lower value moves the whole avatar
+// more slowly. Blinking and lip-sync stay on real time so it never feels dead.
+let motionScale = clamp(parseFloat(store.get("motionScale")) || 0.5, 0.1, 2);
+function setMotionScale(v) {
+  motionScale = clamp(+v || 1, 0.1, 2);
+  store.set("motionScale", String(motionScale));
+  for (const id of ["#pickMotion", "#pickMotion2"]) { const el = $(id); if (el) el.value = Math.round(motionScale * 100); }
+  const sv = $("#pickMotionVal"); if (sv) sv.textContent = Math.round(motionScale * 100) + "%";
+  const sv2 = $("#pickMotionVal2"); if (sv2) sv2.textContent = Math.round(motionScale * 100) + "%";
+}
 function applyPos() {
   const t = (posFrac - 0.5) * 100;             // % of the stage width (each layer is 100% wide)
   const tf = `translateX(${t}%) scale(${charScale})`;
@@ -277,15 +289,15 @@ function setExercise(name, loops = 3, overwrite = false) {
   else (S.exQ = S.exQ || []).push({ clip, key, loops: n });
 }
 function startExercise(clip, key, loops) {
-  const t = now(), dur = clip.frames / clip.fps * 1000;
-  S.exercise = { name: key, clip, t0: t, until: t + dur * Math.max(1, loops), noArms: EX_RELAXED_ARMS.has(key) }; if (S.stance) S.stance.until = t;
+  const t = now(), dur = clip.frames / clip.fps * 1000 * Math.max(1, loops);
+  S.exercise = { name: key, clip, t0: t, dur, noArms: EX_RELAXED_ARMS.has(key) }; if (S.stance) S.stance.until = t;
   emit("exercise", { exercise: key, loops });
 }
 // leg exercises: the subjects held their forearms up out of the way; the avatar lets its arms hang instead
 const EX_RELAXED_ARMS = new Set(["hurdle_step", "inline_lunge", "side_lunge", "straight_leg_raise"]);
 function exerciseNames() { return EXERCISES ? Object.keys(EXERCISES).filter(k => !k.startsWith("_")) : []; }
 function exercisePose(ex, t) {
-  const c = ex.clip, fpos = ((t - ex.t0) / 1000 * c.fps) % (c.frames - 1), i = Math.floor(fpos), f = fpos - i, B = c.B, k = 1 / 32767;
+  const c = ex.clip, fpos = ((t - ex.t0) * motionScale / 1000 * c.fps) % (c.frames - 1), i = Math.floor(fpos), f = fpos - i, B = c.B, k = 1 / 32767;
   for (let b = 0; b < B; b++) {
     const o0 = (i * B + b) * 4, o1 = ((i + 1) * B + b) * 4, r = c.pose.rot[c.bones[b]] ||= [0, 0, 0, 1];
     let x = c.q[o0] * (1 - f) + c.q[o1] * f, y = c.q[o0 + 1] * (1 - f) + c.q[o1 + 1] * f, z = c.q[o0 + 2] * (1 - f) + c.q[o1 + 2] * f, w = c.q[o0 + 3] * (1 - f) + c.q[o1 + 3] * f;
@@ -309,7 +321,7 @@ function setPose(name, holdMs = 3000, opts = {}) {
   if (active !== VrmAvatar) log("Poses need a 3D (VRM) character.");
   const t = now(), wasOn = S.stance && t < S.stance.until + 400;
   const t1 = t + (opts.delay || 0);
-  S.stance = { name: key, t0: wasOn ? S.stance.t0 : t1, until: t1 + holdMs, from: wasOn ? S.stance.name : null, switchT: t1, mask: opts.mask || null };
+  S.stance = { name: key, t0: wasOn ? S.stance.t0 : t1, hold: holdMs, until: t1 + holdMs / motionScale, from: wasOn ? S.stance.name : null, switchT: t1, mask: opts.mask || null };
   emit("pose", { pose: key, hold: holdMs });
 }
 const GESTURES = {
@@ -1286,7 +1298,7 @@ function step(t, dt) {
   }
   if (t < S.humUntil) { speechMouth = Math.max(speechMouth, .12 + .08 * Math.sin(t / 90)); S.viseme = S.speaking ? S.viseme : "ou"; }
   let yawn = 0;
-  if (S.yawn) { const p = (t - S.yawn.t0) / S.yawn.dur; if (p >= 1) S.yawn = null; else if (p > 0) { yawn = Math.sin(p * Math.PI); if (!S.speaking) S.viseme = "oh"; } }
+  if (S.yawn) { const p = (t - S.yawn.t0) * motionScale / S.yawn.dur; if (p >= 1) S.yawn = null; else if (p > 0) { yawn = Math.sin(p * Math.PI); if (!S.speaking) S.viseme = "oh"; } }
   readMic();
   if (S.mic > speechMouth) { speechMouth = S.mic; if (!S.speaking) S.viseme = "aa"; }
   if (t - S.extMouthT < 300) {                        // level of speech played by the host app
@@ -1296,7 +1308,7 @@ function step(t, dt) {
   S.mouth = damp(S.mouth, Math.max(speechMouth, yawn * .95), 28, dt);
 
   // pose: breathing, sway, emotion, gestures
-  const ts = t / 1000;
+  const ts = (t / 1000) * motionScale;
   const breath = Math.sin(ts * Math.PI * 2 / 3.8);
   let hx = S.params.headX + Math.sin(ts * .9) * .015 - yawn * .12;
   let hy = Math.sin(ts * .41) * .05 + S.look.x * .12;
@@ -1304,19 +1316,21 @@ function step(t, dt) {
   const Q = { hx, hy, hz, by: 0, bx: 0, bz: 0, shrug: 0, lookX: 0, lookY: 0, arms: { L: { ...REST_ARM, w: 0 }, R: { ...REST_ARM, w: 0 } }, armsV: { L: { ...REST_ARM, w: 0 }, R: { ...REST_ARM, w: 0 } },
     hands: { L: { ...REST_HAND, w: 0 }, R: { ...REST_HAND, w: 0 } }, wink: 0, flip: 0, spin: 0, lift: 0, crouch: 0, tuck: 0, kneeL: 0, kneeR: 0, phone: 0 };
   if (S.target.emotion === "sleepy") Q.hz += Math.sin(ts * .8) * .05 * S.w.sleepy;
-  S.gestures = S.gestures.filter(g => t - g.t0 < g.dur);
-  for (const g of S.gestures) GESTURES[g.name].run((t - g.t0) / g.dur, (t - g.t0) / 1000, Q);
+  S.gestures = S.gestures.filter(g => t - g.t0 < g.dur / motionScale);
+  for (const g of S.gestures) GESTURES[g.name].run((t - g.t0) * motionScale / g.dur, (t - g.t0) * motionScale / 1000, Q);
   Q.poseW = 0;
   if (S.stance) {
-    const ps = S.stance, win = sstep((t - ps.t0) / 400), wout = 1 - sstep((t - ps.until) / 450);
+    const ps = S.stance; ps.until = ps.switchT + ps.hold / motionScale;   // live: current speed sets when the held pose lapses
+    const win = sstep((t - ps.t0) * motionScale / 400), wout = 1 - sstep((t - ps.until) * motionScale / 450);
     Q.poseW = Math.max(0, Math.min(win, wout)); Q.pose = resolvePose(ps.name); if (!Q.pose) { Q.pose = { rot: {}, drop: 0, hands: { L: REST_HAND, R: REST_HAND } }; } Q.poseMask = ps.mask;
     // when switching from one pose straight to another, blend between them
-    Q.poseFrom = resolvePose(ps.from); Q.poseMix = sstep((t - ps.switchT) / 400);
+    Q.poseFrom = resolvePose(ps.from); Q.poseMix = sstep((t - ps.switchT) * motionScale / 400);
     if (Q.poseW <= 0 && t > ps.until) S.stance = null;
     else if (!ps.mask && Q.pose.hands) for (const side of ["L", "R"]) hand(Q, side, Q.poseW, "relaxed", Q.pose.hands[side]);
   }
   if (S.exercise) {                                   // an exercise clip drives the body through the pose system
-    const ex = S.exercise, w = Math.max(0, Math.min(sstep((t - ex.t0) / 500), 1 - sstep((t - ex.until) / 600)));
+    const ex = S.exercise; ex.until = ex.t0 + ex.dur / motionScale;   // live: current speed sets when the clip ends
+    const w = Math.max(0, Math.min(sstep((t - ex.t0) * motionScale / 500), 1 - sstep((t - ex.until) * motionScale / 600)));
     if (w <= 0 && t > ex.until) {
       S.exercise = null;
       const next = (S.exQ || []).shift();             // a queued clip from the same cue batch: play it next
@@ -2088,6 +2102,7 @@ $("#copyCheck").onclick = async () => {
 };
 $("#wsBtn").onclick = toggleWs;
 $("#framing").onchange = e => setFraming(e.target.value);
+$("#pickMotion2").oninput = e => setMotionScale(+e.target.value / 100);
 $("#charSelect").onchange = e => selectCharacter(e.target.value);
 $("#loadBtn").onclick = () => $("#fileInput").click();
 { const saved = parseFloat(store.get("brightness")); const k = saved > 0 ? saved : .7;
@@ -2254,6 +2269,7 @@ if ($("#pickTestVoice")) $("#pickTestVoice").onclick = () => testKokoroVoice();
   pf.onchange = () => setFraming(pf.value);
   if (pp) pp.oninput = () => setPos(pp.value / 100);
   if (ps) ps.oninput = () => setScale(+ps.value);
+  const pm = $("#pickMotion"); if (pm) pm.oninput = () => setMotionScale(+pm.value / 100);
   pb.onchange = () => {
     if (!pb.value) { applyBackground(null); return; }
     if (pb.value === "upload") { log("Upload a new background image to replace the saved one."); $("#bgInput").click(); return; }
@@ -2343,6 +2359,7 @@ function loop() {
     if (!window.__afErr) { window.__afErr = true; console.warn("avatar: a frame threw and was skipped:", err); }
   }
 }
+setMotionScale(motionScale);   // populate the Movement-speed controls with the restored value
 fillCharSelect();
 // Restore the last character, framing and background (set in the full page or in
 // the in-stage picker, reused when embedded).
